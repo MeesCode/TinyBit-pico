@@ -1,0 +1,3 @@
+[submodule "TinyBit-lib"]
+	path = TinyBit-lib
+	url = git@github.com:MeesCode/TinyBit-lib.git
