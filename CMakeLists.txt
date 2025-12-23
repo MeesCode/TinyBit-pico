@@ -47,6 +47,16 @@ pico_generate_pio_header(tinybit ${CMAKE_CURRENT_LIST_DIR}/st7789_lcd.pio)
 # pull in common dependencies
 target_link_libraries(tinybit pico_stdlib hardware_pio hardware_interp tinybit_lib)
 
+# Increase heap size for Lua
+# With TinyBitMemory (80KB), we have limited RAM left
+target_compile_definitions(tinybit PRIVATE
+    PICO_HEAP_SIZE=32768
+)
+
+# Enable USB output for debugging (optional)
+pico_enable_stdio_usb(tinybit 1)
+pico_enable_stdio_uart(tinybit 0)
+
 # create map/bin/hex/uf2 file etc.
 pico_add_extra_outputs(tinybit)
 

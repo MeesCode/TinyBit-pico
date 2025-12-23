@@ -14,6 +14,7 @@
 
 #include "st7789_lcd.pio.h"
 #include "image_rgb565.h"
+#include "cartridge.h"
 
 #include "TinyBit-lib/tinybit.h"
 
@@ -89,8 +90,30 @@ static inline void st7789_start_pixels(PIO pio, uint sm) {
     lcd_set_dc_cs(1, 0);
 }
 
+void tinybit_poll_input(){
+    // Placeholder: No input handling in this demo
+}
+
+int to_ms(){
+    return to_ms_since_boot(get_absolute_time());
+}
+
+void render_frame(){
+    // Placeholder: No frame rendering in this demo
+}
+
+void log_printf(const char* msg){
+    printf("%s", msg);
+}
+
+void sleep_ms_wrapper(int ms){
+    sleep_ms(ms);
+}
+
 int main() {
     stdio_init_all();
+
+    printf("TinyBit on ST7789 LCD Demo\n");
 
     PIO pio = pio0;
     uint sm = 0;
@@ -111,7 +134,25 @@ int main() {
     lcd_init(pio, sm, st7789_init_seq);
     gpio_put(PIN_BL, 1);
 
+    tinybit_log_cb(log_printf);
+    tinybit_gamecount_cb(NULL);
+    tinybit_gameload_cb(NULL);    
+    tinybit_render_cb(render_frame);
+    tinybit_poll_input_cb(tinybit_poll_input);
+    tinybit_sleep_cb(sleep_ms_wrapper);
+    tinybit_get_ticks_ms_cb(to_ms);
+
     tinybit_init(&tb_mem, button_state);
+    int result = tinybit_feed_cartridge(games_flappy_tb_png, games_flappy_tb_png_len);
+
+    if(result < 0){
+        while(1) printf("Failed to load cartridge!\n");
+    }
+
+    tinybit_start();
+
+    tinybit_loop();
+
 
     // Other SDKs: static image on screen, lame, boring
     // Raspberry Pi Pico SDK: spinning image on screen, bold, exciting
@@ -147,6 +188,7 @@ int main() {
         interp0->base[0] = rotate[0];
         interp0->base[1] = rotate[2];
         st7789_start_pixels(pio, sm);
+        printf("frame theta: %.2f radians\n", theta);
         for (int y = 0; y < SCREEN_HEIGHT; ++y) {
             interp0->accum[0] = rotate[1] * y;
             interp0->accum[1] = rotate[3] * y;
