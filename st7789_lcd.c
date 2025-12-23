@@ -37,6 +37,9 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+PIO pio = pio0;
+uint sm = 0;
+
 struct TinyBitMemory tb_mem = {0};
 bool button_state[TB_BUTTON_COUNT] = {0};
 
@@ -99,7 +102,52 @@ int to_ms(){
 }
 
 void render_frame(){
-    // Placeholder: No frame rendering in this demo
+    printf("Rendering frame...\n");
+    st7789_start_pixels(pio, sm);
+    // interp0->accum[1] = 0; // Reset Y
+
+    for (int y = 0; y < SCREEN_WIDTH; y++) {
+        // interp0->accum[0] = 0; // Reset X
+        
+        for (int x = 0; x < SCREEN_WIDTH; x++) {
+
+            if(x >= 128 || y >= 128) {
+                // Send black pixel for out-of-bounds
+                st7789_lcd_put(pio, sm, 0x00);
+                st7789_lcd_put(pio, sm, 0x00);
+                continue;
+            }
+
+            // // 1. Get scaled address from Interpolator
+            // uint16_t* addr = (uint16_t*)tb_mem.display[y*SCREEN_WIDTH + x];
+            // uint16_t raw = *addr;
+
+            // // 2. Convert RGBA4444 to RGB565
+            // // RRRR GGGG BBBB AAAA -> RRRRR GGGGGG BBBBB
+            // uint16_t rgb = ((raw & 0xF000) >> 1) | // Red
+            //                ((raw & 0x0F00) >> 3) | // Green
+            //                ((raw & 0x00F0) >> 4);  // Blue
+
+            // // 3. Stream directly to PIO FIFO
+            // st7789_lcd_put(pio, sm, rgb >> 8);    // High byte
+            // st7789_lcd_put(pio, sm, rgb & 0xFF);  // Low byte
+
+            uint8_t r = (tb_mem.display[(y * TB_SCREEN_WIDTH + x) * 2 + 0] << 0) & 0xf0;
+            uint8_t g = (tb_mem.display[(y * TB_SCREEN_WIDTH + x) * 2 + 0] << 4) & 0xf0;
+            uint8_t b = (tb_mem.display[(y * TB_SCREEN_WIDTH + x) * 2 + 1] << 0) & 0xf0;
+            uint8_t a = (tb_mem.display[(y * TB_SCREEN_WIDTH + x) * 2 + 1] << 4) & 0xf0;
+
+            // Convert RGBA4444 to RGB565
+            // RRRR GGGG BBBB AAAA -> RRRRR GGGGGG BBBBB
+            uint16_t rgb = ((r & 0xF0) << 8) | // Red
+                           ((g & 0xF0) << 3) | // Green
+                           ((b & 0xF0) >> 3);  // Blue
+            st7789_lcd_put(pio, sm, rgb >> 8);    // High byte
+            st7789_lcd_put(pio, sm, rgb & 0xFF);
+        }
+        // Increment Y accumulator for next row
+        // interp0->accum[1] += interp0->base[1];
+    }
 }
 
 void log_printf(const char* msg){
@@ -148,6 +196,26 @@ int main() {
     if(result < 0){
         while(1) printf("Failed to load cartridge!\n");
     }
+
+    // // Lane 0: Horizontal scaling
+    // interp_config c0 = interp_default_config();
+    // interp_config_set_shift(&c0, 24);
+    // interp_config_set_mask(&c0, 0, 6); // 0-127
+    // interp_set_config(interp0, 0, &c0);
+
+    // // Lane 1: Vertical scaling (multiplied by 128 for row offset)
+    // interp_config c1 = interp_default_config();
+    // interp_config_set_shift(&c1, 24);
+    // interp_config_set_mask(&c1, 7, 13); // (0-127) << 7
+    // interp_set_config(interp0, 1, &c1);
+
+    // // Base2 is the memory start pointer
+    // interp0->base[2] = (uintptr_t)tb_mem.display;
+    
+    // // Step: (128/240) * 2^24
+    // uint32_t step = (uint32_t)((128.0f / 240.0f) * (1 << 24));
+    // interp0->base[0] = step;
+    // interp0->base[1] = step;
 
     tinybit_start();
 
