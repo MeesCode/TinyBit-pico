@@ -39,7 +39,9 @@ add_subdirectory(TinyBit-lib)
 # Add executable. Default name is the project name, version 0.1
 
 add_executable(tinybit
+    main.c
     st7789_lcd.c
+    syscalls.c
 )
 
 pico_generate_pio_header(tinybit ${CMAKE_CURRENT_LIST_DIR}/st7789_lcd.pio)
@@ -52,6 +54,7 @@ target_link_libraries(tinybit pico_stdlib hardware_pio hardware_interp tinybit_l
 target_compile_definitions(tinybit PRIVATE
     PICO_HEAP_SIZE=32768
 )
+
 
 # Enable USB output for debugging (optional)
 pico_enable_stdio_usb(tinybit 1)

@@ -5,24 +5,15 @@
  */
 
 #include <stdio.h>
-#include <math.h>
-
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "hardware/gpio.h"
-#include "hardware/interp.h"
 
 #include "st7789_lcd.pio.h"
-#include "image_rgb565.h"
-#include "cartridge.h"
+#include "main.h"
 
-#include "TinyBit-lib/tinybit.h"
-
-// Tested with the parts that have the height of 240 and 320
 #define SCREEN_WIDTH 240
 #define SCREEN_HEIGHT 240
-#define IMAGE_SIZE 256
-#define LOG_IMAGE_SIZE 8
 
 #define PIN_DIN 0
 #define PIN_CLK 1
@@ -33,26 +24,18 @@
 
 #define SERIAL_CLK_DIV 1.f
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-PIO pio = pio0;
-uint sm = 0;
-
-struct TinyBitMemory tb_mem = {0};
-bool button_state[TB_BUTTON_COUNT] = {0};
+static PIO pio = pio0;
+static uint sm = 0;
 
 // Format: cmd length (including cmd byte), post delay in units of 5 ms, then cmd payload
-// Note the delays have been shortened a little
 static const uint8_t st7789_init_seq[] = {
         1, 20, 0x01,                        // Software reset
         1, 10, 0x11,                        // Exit sleep mode
         2, 2, 0x3a, 0x55,                   // Set colour mode to 16 bit
-        2, 0, 0x36, 0x00,                   // Set MADCTL: row then column, refresh is bottom to top ????
+        2, 0, 0x36, 0x00,                   // Set MADCTL: row then column, refresh is bottom to top
         5, 0, 0x2a, 0x00, 0x00, SCREEN_WIDTH >> 8, SCREEN_WIDTH & 0xff,   // CASET: column addresses
         5, 0, 0x2b, 0x00, 0x00, SCREEN_HEIGHT >> 8, SCREEN_HEIGHT & 0xff, // RASET: row addresses
-        1, 2, 0x21,                         // Inversion on, then 10 ms delay (supposedly a hack?)
+        1, 2, 0x21,                         // Inversion on, then 10 ms delay
         1, 2, 0x13,                         // Normal display on, then 10 ms delay
         1, 2, 0x29,                         // Main screen turn on, then wait 500 ms
         0                                   // Terminate list
@@ -93,59 +76,7 @@ static inline void st7789_start_pixels(PIO pio, uint sm) {
     lcd_set_dc_cs(1, 0);
 }
 
-void tinybit_poll_input(){
-    // Placeholder: No input handling in this demo
-}
-
-int to_ms(){
-    return to_ms_since_boot(get_absolute_time());
-}
-
-void render_frame(){
-    printf("Rendering frame...\n");
-    st7789_start_pixels(pio, sm);
-
-    for (int y = 0; y < SCREEN_WIDTH; y++) {
-        for (int x = 0; x < SCREEN_WIDTH; x++) {
-
-            if(x >= 120 || y >= 120) {
-                st7789_lcd_put(pio, sm, 0x00);  
-                st7789_lcd_put(pio, sm, 0x00);    
-                continue;
-            }
-
-            size_t addr = ((y * TB_SCREEN_WIDTH + x) * 2);
-
-            uint8_t r = (tb_mem.display[addr + 0] << 0) & 0xf0;
-            uint8_t g = (tb_mem.display[addr + 0] << 4) & 0xf0;
-            uint8_t b = (tb_mem.display[addr + 1] << 0) & 0xf0;
-            uint8_t a = (tb_mem.display[addr + 1] << 4) & 0xf0;
-
-            // Convert RGBA4444 to RGB565
-            uint16_t rgb = ((r & 0xF0) << 8) | // Red
-                           ((g & 0xF0) << 3) | // Green
-                           ((b & 0xF0) >> 3);  // Blue
-            st7789_lcd_put(pio, sm, rgb >> 8);    // High byte
-            st7789_lcd_put(pio, sm, rgb & 0xFF);
-        }
-    }
-}
-
-void log_printf(const char* msg){
-    printf("%s", msg);
-}
-
-void sleep_ms_wrapper(int ms){
-    sleep_ms(ms);
-}
-
-int main() {
-    stdio_init_all();
-
-    printf("TinyBit on ST7789 LCD Demo\n");
-
-    PIO pio = pio0;
-    uint sm = 0;
+void lcd_init_display(void) {
     uint offset = pio_add_program(pio, &st7789_lcd_program);
     st7789_lcd_program_init(pio, sm, offset, PIN_DIN, PIN_CLK, SERIAL_CLK_DIV);
 
@@ -162,23 +93,32 @@ int main() {
     gpio_put(PIN_RESET, 1);
     lcd_init(pio, sm, st7789_init_seq);
     gpio_put(PIN_BL, 1);
+}
 
-    tinybit_log_cb(log_printf);
-    tinybit_gamecount_cb(NULL);
-    tinybit_gameload_cb(NULL);    
-    tinybit_render_cb(render_frame);
-    tinybit_poll_input_cb(tinybit_poll_input);
-    tinybit_sleep_cb(sleep_ms_wrapper);
-    tinybit_get_ticks_ms_cb(to_ms);
+void render_frame(void) {
+    st7789_start_pixels(pio, sm);
 
-    tinybit_init(&tb_mem, button_state);
-    int result = tinybit_feed_cartridge(games_flappy_tb_png, games_flappy_tb_png_len);
+    for (int y = 0; y < SCREEN_WIDTH; y++) {
+        for (int x = 0; x < SCREEN_WIDTH; x++) {
 
-    if(result < 0){
-        while(1) printf("Failed to load cartridge!\n");
+            if (x >= 120 || y >= 120) {
+                st7789_lcd_put(pio, sm, 0x00);
+                st7789_lcd_put(pio, sm, 0x00);
+                continue;
+            }
+
+            size_t addr = ((y * TB_SCREEN_WIDTH + x) * 2);
+
+            uint8_t r = (tb_mem.display[addr + 0] << 0) & 0xf0;
+            uint8_t g = (tb_mem.display[addr + 0] << 4) & 0xf0;
+            uint8_t b = (tb_mem.display[addr + 1] << 0) & 0xf0;
+
+            // Convert RGBA4444 to RGB565
+            uint16_t rgb = ((r & 0xF0) << 8) | // Red
+                           ((g & 0xF0) << 3) | // Green
+                           ((b & 0xF0) >> 3);  // Blue
+            st7789_lcd_put(pio, sm, rgb >> 8);    // High byte
+            st7789_lcd_put(pio, sm, rgb & 0xFF);
+        }
     }
-
-    tinybit_start();
-    tinybit_loop();
-    return 0;
 }
