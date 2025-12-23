@@ -47,7 +47,7 @@ add_executable(tinybit
 pico_generate_pio_header(tinybit ${CMAKE_CURRENT_LIST_DIR}/st7789_lcd.pio)
 
 # pull in common dependencies
-target_link_libraries(tinybit pico_stdlib hardware_pio hardware_interp tinybit_lib)
+target_link_libraries(tinybit pico_stdlib hardware_pio hardware_interp hardware_dma tinybit_lib)
 
 # Increase heap size for Lua
 # With TinyBitMemory (80KB), we have limited RAM left

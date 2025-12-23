@@ -5,10 +5,12 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "hardware/gpio.h"
 #include "hardware/interp.h"
+#include "hardware/dma.h"
 
 #include "st7789_lcd.pio.h"
 #include "main.h"
@@ -26,6 +28,11 @@
 // 128/240 = 0.5333... -> (128 << 16) / 240 = 34952
 #define SCALE_X ((RENDER_WIDTH << FRAC_BITS) / SCREEN_WIDTH)
 #define SCALE_Y ((RENDER_HEIGHT << FRAC_BITS) / SCREEN_HEIGHT)
+
+// Double buffer for DMA transfers - each scanline is SCREEN_WIDTH pixels * 2 bytes
+static uint8_t scanline_buf[2][SCREEN_WIDTH * 2];
+static int dma_chan;
+static dma_channel_config dma_cfg;
 
 #define PIN_DIN 0
 #define PIN_CLK 1
@@ -105,54 +112,83 @@ void lcd_init_display(void) {
     gpio_put(PIN_RESET, 1);
     lcd_init(pio, sm, st7789_init_seq);
     gpio_put(PIN_BL, 1);
+
+    // Initialize DMA channel for scanline transfers
+    dma_chan = dma_claim_unused_channel(true);
+    dma_cfg = dma_channel_get_default_config(dma_chan);
+    channel_config_set_transfer_data_size(&dma_cfg, DMA_SIZE_8);
+    channel_config_set_dreq(&dma_cfg, pio_get_dreq(pio, sm, true));
+    channel_config_set_read_increment(&dma_cfg, true);
+    channel_config_set_write_increment(&dma_cfg, false);
+}
+
+static inline void build_scanline(uint8_t *buf, uint32_t src_y) {
+    // Pre-compute row base pointer (optimization: move multiply out of inner loop)
+    const uint16_t *row_base = (const uint16_t *)&tb_mem.display[src_y * TB_SCREEN_WIDTH * 2];
+
+    // Configure interpolator for X stepping
+    interp0->accum[0] = 0;
+    interp0->base[0] = SCALE_X;
+
+    for (int x = 0; x < SCREEN_WIDTH; x++) {
+        // Get source X from accumulator (no clamp needed - scale factor ensures valid range)
+        uint32_t src_x = interp0->accum[0] >> FRAC_BITS;
+        (void)interp0->pop[0];  // Advance accumulator by SCALE_X
+
+        // Read pixel as 16-bit (optimization: single memory access instead of two)
+        uint16_t pixel = row_base[src_x];
+
+        // Extract RGBA4444 components and convert to RGB565
+        // pixel format: RRRRGGGG BBBBAAAA
+        uint8_t r = (pixel >> 0) & 0xf0;
+        uint8_t g = (pixel << 4) & 0xf0;
+        uint8_t b = (pixel >> 8) & 0xf0;
+
+        uint16_t rgb565 = ((r & 0xF0) << 8) |  // Red
+                          ((g & 0xF0) << 3) |  // Green
+                          ((b & 0xF0) >> 3);   // Blue
+
+        // Store in big-endian order for LCD
+        buf[x * 2 + 0] = rgb565 >> 8;
+        buf[x * 2 + 1] = rgb565 & 0xFF;
+    }
 }
 
 void render_frame(void) {
     st7789_start_pixels(pio, sm);
 
-    // Configure interpolator 0 for X coordinate scaling
+    // Configure interpolator once per frame
     interp_config cfg = interp_default_config();
-    interp_config_set_add_raw(&cfg, true);  // Add raw value (no shift on add)
+    interp_config_set_add_raw(&cfg, true);
     interp_set_config(interp0, 0, &cfg);
 
-    // Configure interpolator 1 for Y coordinate scaling
-    interp_set_config(interp0, 1, &cfg);
+    int current_buf = 0;
+
+    // Build first scanline
+    uint32_t src_y = 0;
+    build_scanline(scanline_buf[current_buf], src_y);
 
     for (int y = 0; y < SCREEN_HEIGHT; y++) {
-        // Calculate source Y using interpolator lane 1
-        // src_y = (y * SCALE_Y) >> FRAC_BITS
-        interp0->base[1] = 0;
-        interp0->accum[1] = y * SCALE_Y;
-        uint32_t src_y = interp0->peek[1] >> FRAC_BITS;
+        // Start DMA transfer of current scanline
+        dma_channel_configure(
+            dma_chan,
+            &dma_cfg,
+            &pio->txf[sm],              // Write to PIO TX FIFO
+            scanline_buf[current_buf],   // Read from scanline buffer
+            SCREEN_WIDTH * 2,            // Transfer count (bytes)
+            true                         // Start immediately
+        );
 
-        // Clamp to valid range
-        if (src_y >= RENDER_HEIGHT) src_y = RENDER_HEIGHT - 1;
+        // Switch to other buffer and build next scanline while DMA runs
+        current_buf = 1 - current_buf;
 
-        // Reset X accumulator for this row
-        interp0->accum[0] = 0;
-
-        for (int x = 0; x < SCREEN_WIDTH; x++) {
-            // Get source X and advance accumulator
-            uint32_t src_x = interp0->accum[0] >> FRAC_BITS;
-            interp0->base[0] = SCALE_X;
-            (void)interp0->pop[0];  // Add SCALE_X to accumulator
-
-            // Clamp to valid range
-            if (src_x >= RENDER_WIDTH) src_x = RENDER_WIDTH - 1;
-
-            // Calculate address in source buffer
-            size_t addr = ((src_y * TB_SCREEN_WIDTH + src_x) * 2);
-
-            uint8_t r = (tb_mem.display[addr + 0] << 0) & 0xf0;
-            uint8_t g = (tb_mem.display[addr + 0] << 4) & 0xf0;
-            uint8_t b = (tb_mem.display[addr + 1] << 0) & 0xf0;
-
-            // Convert RGBA4444 to RGB565
-            uint16_t rgb = ((r & 0xF0) << 8) | // Red
-                           ((g & 0xF0) << 3) | // Green
-                           ((b & 0xF0) >> 3);  // Blue
-            st7789_lcd_put(pio, sm, rgb >> 8);    // High byte
-            st7789_lcd_put(pio, sm, rgb & 0xFF);
+        if (y < SCREEN_HEIGHT - 1) {
+            // Calculate source Y for next line
+            src_y = ((y + 1) * SCALE_Y) >> FRAC_BITS;
+            build_scanline(scanline_buf[current_buf], src_y);
         }
+
+        // Wait for DMA to complete before reusing buffer
+        dma_channel_wait_for_finish_blocking(dma_chan);
     }
 }
