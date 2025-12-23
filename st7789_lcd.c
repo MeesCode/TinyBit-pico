@@ -8,12 +8,24 @@
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "hardware/gpio.h"
+#include "hardware/interp.h"
 
 #include "st7789_lcd.pio.h"
 #include "main.h"
 
 #define SCREEN_WIDTH 240
 #define SCREEN_HEIGHT 240
+
+#define RENDER_WIDTH 128
+#define RENDER_HEIGHT 128
+
+// Fixed-point fractional bits for scaling
+#define FRAC_BITS 16
+
+// Scaling factor: RENDER_WIDTH / SCREEN_WIDTH in fixed-point
+// 128/240 = 0.5333... -> (128 << 16) / 240 = 34952
+#define SCALE_X ((RENDER_WIDTH << FRAC_BITS) / SCREEN_WIDTH)
+#define SCALE_Y ((RENDER_HEIGHT << FRAC_BITS) / SCREEN_HEIGHT)
 
 #define PIN_DIN 0
 #define PIN_CLK 1
@@ -98,16 +110,38 @@ void lcd_init_display(void) {
 void render_frame(void) {
     st7789_start_pixels(pio, sm);
 
-    for (int y = 0; y < SCREEN_WIDTH; y++) {
+    // Configure interpolator 0 for X coordinate scaling
+    interp_config cfg = interp_default_config();
+    interp_config_set_add_raw(&cfg, true);  // Add raw value (no shift on add)
+    interp_set_config(interp0, 0, &cfg);
+
+    // Configure interpolator 1 for Y coordinate scaling
+    interp_set_config(interp0, 1, &cfg);
+
+    for (int y = 0; y < SCREEN_HEIGHT; y++) {
+        // Calculate source Y using interpolator lane 1
+        // src_y = (y * SCALE_Y) >> FRAC_BITS
+        interp0->base[1] = 0;
+        interp0->accum[1] = y * SCALE_Y;
+        uint32_t src_y = interp0->peek[1] >> FRAC_BITS;
+
+        // Clamp to valid range
+        if (src_y >= RENDER_HEIGHT) src_y = RENDER_HEIGHT - 1;
+
+        // Reset X accumulator for this row
+        interp0->accum[0] = 0;
+
         for (int x = 0; x < SCREEN_WIDTH; x++) {
+            // Get source X and advance accumulator
+            uint32_t src_x = interp0->accum[0] >> FRAC_BITS;
+            interp0->base[0] = SCALE_X;
+            (void)interp0->pop[0];  // Add SCALE_X to accumulator
 
-            if (x >= 120 || y >= 120) {
-                st7789_lcd_put(pio, sm, 0x00);
-                st7789_lcd_put(pio, sm, 0x00);
-                continue;
-            }
+            // Clamp to valid range
+            if (src_x >= RENDER_WIDTH) src_x = RENDER_WIDTH - 1;
 
-            size_t addr = ((y * TB_SCREEN_WIDTH + x) * 2);
+            // Calculate address in source buffer
+            size_t addr = ((src_y * TB_SCREEN_WIDTH + src_x) * 2);
 
             uint8_t r = (tb_mem.display[addr + 0] << 0) & 0xf0;
             uint8_t g = (tb_mem.display[addr + 0] << 4) & 0xf0;
