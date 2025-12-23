@@ -104,49 +104,30 @@ int to_ms(){
 void render_frame(){
     printf("Rendering frame...\n");
     st7789_start_pixels(pio, sm);
-    // interp0->accum[1] = 0; // Reset Y
 
     for (int y = 0; y < SCREEN_WIDTH; y++) {
-        // interp0->accum[0] = 0; // Reset X
-        
         for (int x = 0; x < SCREEN_WIDTH; x++) {
 
-            if(x >= 128 || y >= 128) {
-                // Send black pixel for out-of-bounds
-                st7789_lcd_put(pio, sm, 0x00);
-                st7789_lcd_put(pio, sm, 0x00);
+            if(x >= 120 || y >= 120) {
+                st7789_lcd_put(pio, sm, 0x00);  
+                st7789_lcd_put(pio, sm, 0x00);    
                 continue;
             }
 
-            // // 1. Get scaled address from Interpolator
-            // uint16_t* addr = (uint16_t*)tb_mem.display[y*SCREEN_WIDTH + x];
-            // uint16_t raw = *addr;
+            size_t addr = ((y * TB_SCREEN_WIDTH + x) * 2);
 
-            // // 2. Convert RGBA4444 to RGB565
-            // // RRRR GGGG BBBB AAAA -> RRRRR GGGGGG BBBBB
-            // uint16_t rgb = ((raw & 0xF000) >> 1) | // Red
-            //                ((raw & 0x0F00) >> 3) | // Green
-            //                ((raw & 0x00F0) >> 4);  // Blue
-
-            // // 3. Stream directly to PIO FIFO
-            // st7789_lcd_put(pio, sm, rgb >> 8);    // High byte
-            // st7789_lcd_put(pio, sm, rgb & 0xFF);  // Low byte
-
-            uint8_t r = (tb_mem.display[(y * TB_SCREEN_WIDTH + x) * 2 + 0] << 0) & 0xf0;
-            uint8_t g = (tb_mem.display[(y * TB_SCREEN_WIDTH + x) * 2 + 0] << 4) & 0xf0;
-            uint8_t b = (tb_mem.display[(y * TB_SCREEN_WIDTH + x) * 2 + 1] << 0) & 0xf0;
-            uint8_t a = (tb_mem.display[(y * TB_SCREEN_WIDTH + x) * 2 + 1] << 4) & 0xf0;
+            uint8_t r = (tb_mem.display[addr + 0] << 0) & 0xf0;
+            uint8_t g = (tb_mem.display[addr + 0] << 4) & 0xf0;
+            uint8_t b = (tb_mem.display[addr + 1] << 0) & 0xf0;
+            uint8_t a = (tb_mem.display[addr + 1] << 4) & 0xf0;
 
             // Convert RGBA4444 to RGB565
-            // RRRR GGGG BBBB AAAA -> RRRRR GGGGGG BBBBB
             uint16_t rgb = ((r & 0xF0) << 8) | // Red
                            ((g & 0xF0) << 3) | // Green
                            ((b & 0xF0) >> 3);  // Blue
             st7789_lcd_put(pio, sm, rgb >> 8);    // High byte
             st7789_lcd_put(pio, sm, rgb & 0xFF);
         }
-        // Increment Y accumulator for next row
-        // interp0->accum[1] += interp0->base[1];
     }
 }
 
@@ -197,74 +178,7 @@ int main() {
         while(1) printf("Failed to load cartridge!\n");
     }
 
-    // // Lane 0: Horizontal scaling
-    // interp_config c0 = interp_default_config();
-    // interp_config_set_shift(&c0, 24);
-    // interp_config_set_mask(&c0, 0, 6); // 0-127
-    // interp_set_config(interp0, 0, &c0);
-
-    // // Lane 1: Vertical scaling (multiplied by 128 for row offset)
-    // interp_config c1 = interp_default_config();
-    // interp_config_set_shift(&c1, 24);
-    // interp_config_set_mask(&c1, 7, 13); // (0-127) << 7
-    // interp_set_config(interp0, 1, &c1);
-
-    // // Base2 is the memory start pointer
-    // interp0->base[2] = (uintptr_t)tb_mem.display;
-    
-    // // Step: (128/240) * 2^24
-    // uint32_t step = (uint32_t)((128.0f / 240.0f) * (1 << 24));
-    // interp0->base[0] = step;
-    // interp0->base[1] = step;
-
     tinybit_start();
-
     tinybit_loop();
-
-
-    // Other SDKs: static image on screen, lame, boring
-    // Raspberry Pi Pico SDK: spinning image on screen, bold, exciting
-
-    // Lane 0 will be u coords (bits 8:1 of addr offset), lane 1 will be v
-    // coords (bits 16:9 of addr offset), and we'll represent coords with
-    // 16.16 fixed point. ACCUM0,1 will contain current coord, BASE0/1 will
-    // contain increment vector, and BASE2 will contain image base pointer
-#define UNIT_LSB 16
-    interp_config lane0_cfg = interp_default_config();
-    interp_config_set_shift(&lane0_cfg, UNIT_LSB - 1); // -1 because 2 bytes per pixel
-    interp_config_set_mask(&lane0_cfg, 1, 1 + (LOG_IMAGE_SIZE - 1));
-    interp_config_set_add_raw(&lane0_cfg, true); // Add full accumulator to base with each POP
-    interp_config lane1_cfg = interp_default_config();
-    interp_config_set_shift(&lane1_cfg, UNIT_LSB - (1 + LOG_IMAGE_SIZE));
-    interp_config_set_mask(&lane1_cfg, 1 + LOG_IMAGE_SIZE, 1 + (2 * LOG_IMAGE_SIZE - 1));
-    interp_config_set_add_raw(&lane1_cfg, true);
-
-    interp_set_config(interp0, 0, &lane0_cfg);
-    interp_set_config(interp0, 1, &lane1_cfg);
-    interp0->base[2] = (uint32_t) image_240x240;
-
-    float theta = 0.f;
-    float theta_max = 2.f * (float) M_PI;
-    while (1) {
-        theta += 0.02f;
-        if (theta > theta_max)
-            theta -= theta_max;
-        int32_t rotate[4] = {
-                (int32_t) (cosf(theta) * (1 << UNIT_LSB)), (int32_t) (-sinf(theta) * (1 << UNIT_LSB)),
-                (int32_t) (sinf(theta) * (1 << UNIT_LSB)), (int32_t) (cosf(theta) * (1 << UNIT_LSB))
-        };
-        interp0->base[0] = rotate[0];
-        interp0->base[1] = rotate[2];
-        st7789_start_pixels(pio, sm);
-        printf("frame theta: %.2f radians\n", theta);
-        for (int y = 0; y < SCREEN_HEIGHT; ++y) {
-            interp0->accum[0] = rotate[1] * y;
-            interp0->accum[1] = rotate[3] * y;
-            for (int x = 0; x < SCREEN_WIDTH; ++x) {
-                uint16_t colour = *(uint16_t *) (interp0->pop[2]);
-                st7789_lcd_put(pio, sm, colour >> 8);
-                st7789_lcd_put(pio, sm, colour & 0xff);
-            }
-        }
-    }
+    return 0;
 }
