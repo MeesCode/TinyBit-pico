@@ -2,10 +2,15 @@
  * Main application logic for TinyBit on Pico
  */
 
+// #define SYS_CLK_MHZ 200
+#define PICO_USE_FASTEST_SUPPORTED_CLOCK 1
+
 #include <stdio.h>
-#include "pico/stdlib.h"
+#include <pico/stdlib.h>
+#include <hardware/clocks.h>
 #include "main.h"
 #include "cartridge.h"
+#include <tusb.h>
 
 #include "hw_config.h"
 #include "f_util.h"
@@ -14,8 +19,15 @@
 struct TinyBitMemory tb_mem = {0};
 bool button_state[TB_BUTTON_COUNT] = {0};
 
-void tinybit_poll_input(void) {
-    // Placeholder: No input handling in this demo
+void tinybit_poll_input() {
+    // Update button states
+    // Example: Read GPIO pins and update button_state array
+    button_state[TB_BUTTON_A] = gpio_get(16); 
+    button_state[TB_BUTTON_B] = gpio_get(17); 
+    button_state[TB_BUTTON_UP] = gpio_get(18); 
+    button_state[TB_BUTTON_DOWN] = gpio_get(19); 
+    button_state[TB_BUTTON_LEFT] = gpio_get(20); 
+    button_state[TB_BUTTON_RIGHT] = gpio_get(21); 
 }
 
 int to_ms(void) {
@@ -36,6 +48,25 @@ int main() {
     printf("TinyBit on ST7789 LCD Demo\n");
 
     sleep_ms(5000);
+
+    if (!set_sys_clock_khz(200000, false))
+      printf("system clock 200MHz failed\n");
+    else
+      printf("system clock now 200MHz\n");
+
+    gpio_init(16);
+    gpio_init(17);
+    gpio_init(18);
+    gpio_init(19);
+    gpio_init(20);
+    gpio_init(21);
+
+    gpio_set_dir(16, GPIO_IN);
+    gpio_set_dir(17, GPIO_IN);
+    gpio_set_dir(18, GPIO_IN);
+    gpio_set_dir(19, GPIO_IN);
+    gpio_set_dir(20, GPIO_IN);
+    gpio_set_dir(21, GPIO_IN);
 
     // Initialize LCD display
     lcd_init_display();
@@ -83,7 +114,6 @@ int main() {
         }
         // Process buffer data here (for demo, we just print the number of bytes read)
         tinybit_feed_cartridge(buffer, bytes_read);
-        printf("Read %u bytes from %s\n", bytes_read, filename);
     }
 
     // Close the file
@@ -95,8 +125,8 @@ int main() {
     // Unmount the SD card
     f_unmount("");
 
+    // Alternatively, load cartridge from embedded data
     // int result = tinybit_feed_cartridge(games_flappy_tb_png, games_flappy_tb_png_len);
-
     // if (result < 0) {
     //     while (1) printf("Failed to load cartridge!\n");
     // }
