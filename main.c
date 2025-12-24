@@ -20,15 +20,111 @@
 struct TinyBitMemory tb_mem = {0};
 bool button_state[TB_BUTTON_COUNT] = {0};
 
-void tinybit_poll_input() {
+// Filesystem state (kept mounted for game loading)
+static FATFS fs;
+static bool fs_mounted = false;
+
+// Count PNG files in root directory
+int sd_gamecount(void) {
+    if (!fs_mounted) return 0;
+
+    DIR dir;
+    FILINFO fno;
+    int count = 0;
+
+    FRESULT fr = f_opendir(&dir, "/");
+    if (fr != FR_OK) return 0;
+
+    while (1) {
+        fr = f_readdir(&dir, &fno);
+        if (fr != FR_OK || fno.fname[0] == 0) break;
+
+        // Skip directories
+        if (fno.fattrib & AM_DIR) continue;
+
+        // Check for .png extension (case insensitive)
+        size_t len = strlen(fno.fname);
+        if (len > 4) {
+            const char* ext = &fno.fname[len - 4];
+            if ((ext[0] == '.' || ext[0] == '.') &&
+                (ext[1] == 'p' || ext[1] == 'P') &&
+                (ext[2] == 'n' || ext[2] == 'N') &&
+                (ext[3] == 'g' || ext[3] == 'G')) {
+                count++;
+            }
+        }
+    }
+
+    f_closedir(&dir);
+    return count;
+}
+
+// Load PNG game file by index
+void sd_gameload(int index) {
+    if (!fs_mounted) return;
+
+    DIR dir;
+    FILINFO fno;
+    int count = 0;
+
+    FRESULT fr = f_opendir(&dir, "/");
+    if (fr != FR_OK) return;
+
+    // Find the file at the given index
+    while (1) {
+        fr = f_readdir(&dir, &fno);
+        if (fr != FR_OK || fno.fname[0] == 0) break;
+
+        if (fno.fattrib & AM_DIR) continue;
+
+        size_t len = strlen(fno.fname);
+        if (len > 4) {
+            const char* ext = &fno.fname[len - 4];
+            if ((ext[0] == '.') &&
+                (ext[1] == 'p' || ext[1] == 'P') &&
+                (ext[2] == 'n' || ext[2] == 'N') &&
+                (ext[3] == 'g' || ext[3] == 'G')) {
+                if (count == index) {
+                    f_closedir(&dir);
+
+                    // Load this file
+                    FIL fil;
+                    fr = f_open(&fil, fno.fname, FA_READ);
+                    if (fr != FR_OK) {
+                        printf("Failed to open: %s\n", fno.fname);
+                        return;
+                    }
+
+                    printf("Loading: %s\n", fno.fname);
+
+                    char buffer[256];
+                    UINT bytes_read;
+                    while (1) {
+                        fr = f_read(&fil, buffer, sizeof(buffer), &bytes_read);
+                        if (fr != FR_OK || bytes_read == 0) break;
+                        tinybit_feed_cartridge((uint8_t*)buffer, bytes_read);
+                    }
+
+                    f_close(&fil);
+                    return;
+                }
+                count++;
+            }
+        }
+    }
+
+    f_closedir(&dir);
+}
+
+void tinybit_poll_input(void) {
     // Update button states
     // Example: Read GPIO pins and update button_state array
-    button_state[TB_BUTTON_A] = gpio_get(16); 
-    button_state[TB_BUTTON_B] = gpio_get(17); 
-    button_state[TB_BUTTON_UP] = gpio_get(18); 
+    button_state[TB_BUTTON_A] = gpio_get(17); 
+    button_state[TB_BUTTON_B] = gpio_get(16); 
+    button_state[TB_BUTTON_UP] = gpio_get(21); 
     button_state[TB_BUTTON_DOWN] = gpio_get(19); 
-    button_state[TB_BUTTON_LEFT] = gpio_get(20); 
-    button_state[TB_BUTTON_RIGHT] = gpio_get(21); 
+    button_state[TB_BUTTON_LEFT] = gpio_get(18); 
+    button_state[TB_BUTTON_RIGHT] = gpio_get(20); 
 }
 
 int to_ms(void) {
@@ -45,10 +141,6 @@ void sleep_ms_wrapper(int ms) {
 
 int main() {
     stdio_init_all();
-
-    printf("TinyBit on ST7789 LCD Demo\n");
-
-    sleep_ms(5000);
 
     if (!set_sys_clock_khz(200000, false))
       printf("system clock 200MHz failed\n");
@@ -72,62 +164,26 @@ int main() {
     // Initialize LCD display
     lcd_init_display();
 
+    // Mount SD card filesystem (keep mounted for game loading)
+    FRESULT fr = f_mount(&fs, "", 1);
+    if (FR_OK != fr) {
+        printf("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+    } else {
+        fs_mounted = true;
+        printf("SD card mounted, found %d games\n", sd_gamecount());
+    }
+
     // Set up TinyBit callbacks
     tinybit_log_cb(log_printf);
-    tinybit_gamecount_cb(NULL);
-    tinybit_gameload_cb(NULL);
+    tinybit_gamecount_cb(sd_gamecount);
+    tinybit_gameload_cb(sd_gameload);
     tinybit_render_cb(render_frame);
     tinybit_poll_input_cb(tinybit_poll_input);
     tinybit_sleep_cb(sleep_ms_wrapper);
     tinybit_get_ticks_ms_cb(to_ms);
 
-    // Initialize TinyBit and load cartridge
+    // Initialize TinyBit (starts game selector menu)
     tinybit_init(&tb_mem, button_state);
-
-    // See FatFs - Generic FAT Filesystem Module
-    FATFS fs;
-    FRESULT fr = f_mount(&fs, "", 1);
-    if (FR_OK != fr) {
-        printf("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
-    }
-
-
-    // Open a file and write to it
-    FIL fil;
-    const char* const filename = "flappy.png";
-    fr = f_open(&fil, filename, FA_READ);
-    if (FR_OK != fr && FR_EXIST != fr) {
-        printf("f_open error: %s (%d)\n", FRESULT_str(fr), fr);
-    }
-    
-    char buffer[256];
-    UINT bytes_read;
-    while(1) {
-        fr = f_read(&fil, buffer, sizeof(buffer), &bytes_read);
-        if (FR_OK != fr) {
-            printf("f_read error: %s (%d)\n", FRESULT_str(fr), fr);
-            break;
-        }
-        if (bytes_read == 0) {
-            break;
-        }
-        tinybit_feed_cartridge(buffer, bytes_read);
-    }
-
-    // Close the file
-    fr = f_close(&fil);
-    if (FR_OK != fr) {
-        printf("f_close error: %s (%d)\n", FRESULT_str(fr), fr);
-    }
-
-    // Unmount the SD card
-    f_unmount("");
-
-    // Alternatively, load cartridge from embedded data
-    // int result = tinybit_feed_cartridge(games_flappy_tb_png, games_flappy_tb_png_len);
-    // if (result < 0) {
-    //     while (1) printf("Failed to load cartridge!\n");
-    // }
 
     // Launch core1 for LCD output
     printf("Starting core1 for LCD rendering...\n");
