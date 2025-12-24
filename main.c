@@ -35,33 +35,7 @@ int main() {
 
     printf("TinyBit on ST7789 LCD Demo\n");
 
-    // See FatFs - Generic FAT Filesystem Module, "Application Interface",
-    // http://elm-chan.org/fsw/ff/00index_e.html
-    FATFS fs;
-    FRESULT fr = f_mount(&fs, "", 1);
-    if (FR_OK != fr) {
-        panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
-    }
-
-    // Open a file and write to it
-    FIL fil;
-    const char* const filename = "filename.txt";
-    fr = f_open(&fil, filename, FA_OPEN_APPEND | FA_WRITE);
-    if (FR_OK != fr && FR_EXIST != fr) {
-        panic("f_open(%s) error: %s (%d)\n", filename, FRESULT_str(fr), fr);
-    }
-    if (f_printf(&fil, "Hello, world!\n") < 0) {
-        printf("f_printf failed\n");
-    }
-
-    // Close the file
-    fr = f_close(&fil);
-    if (FR_OK != fr) {
-        printf("f_close error: %s (%d)\n", FRESULT_str(fr), fr);
-    }
-
-    // Unmount the SD card
-    f_unmount("");
+    sleep_ms(5000);
 
     // Initialize LCD display
     lcd_init_display();
@@ -77,11 +51,55 @@ int main() {
 
     // Initialize TinyBit and load cartridge
     tinybit_init(&tb_mem, button_state);
-    int result = tinybit_feed_cartridge(games_flappy_tb_png, games_flappy_tb_png_len);
 
-    if (result < 0) {
-        while (1) printf("Failed to load cartridge!\n");
+        // See FatFs - Generic FAT Filesystem Module, "Application Interface",
+    // http://elm-chan.org/fsw/ff/00index_e.html
+    FATFS fs;
+    FRESULT fr = f_mount(&fs, "", 1);
+    if (FR_OK != fr) {
+        printf("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
     }
+
+
+    // Open a file and write to it
+    FIL fil;
+    const char* const filename = "flappy.png";
+    fr = f_open(&fil, filename, FA_READ);
+    if (FR_OK != fr && FR_EXIST != fr) {
+        printf("f_open error: %s (%d)\n", FRESULT_str(fr), fr);
+    }
+    
+    char buffer[256];
+    UINT bytes_read;
+    while(1) {
+        fr = f_read(&fil, buffer, sizeof(buffer), &bytes_read);
+        if (FR_OK != fr) {
+            printf("f_read error: %s (%d)\n", FRESULT_str(fr), fr);
+            break;
+        }
+        if (bytes_read == 0) {
+            // End of file
+            break;
+        }
+        // Process buffer data here (for demo, we just print the number of bytes read)
+        tinybit_feed_cartridge(buffer, bytes_read);
+        printf("Read %u bytes from %s\n", bytes_read, filename);
+    }
+
+    // Close the file
+    fr = f_close(&fil);
+    if (FR_OK != fr) {
+        printf("f_close error: %s (%d)\n", FRESULT_str(fr), fr);
+    }
+
+    // Unmount the SD card
+    f_unmount("");
+
+    // int result = tinybit_feed_cartridge(games_flappy_tb_png, games_flappy_tb_png_len);
+
+    // if (result < 0) {
+    //     while (1) printf("Failed to load cartridge!\n");
+    // }
 
     // Start game loop
     tinybit_start();
