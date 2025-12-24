@@ -36,19 +36,30 @@ pico_sdk_init()
 # Add TinyBit library
 add_subdirectory(TinyBit-lib)
 
+# Add SD library
+add_subdirectory(no-OS-FatFS-SD-SDIO-SPI-RPi-Pico)
+
 # Add executable. Default name is the project name, version 0.1
 
 add_executable(tinybit
     main.c
     st7789_lcd.c
     syscalls.c
+    hw_config.c
 )
 
 pico_generate_pio_header(tinybit ${CMAKE_CURRENT_LIST_DIR}/st7789_lcd.pio)
 
 # pull in common dependencies
-target_link_libraries(tinybit pico_stdlib hardware_pio hardware_interp hardware_dma tinybit_lib)
-
+target_link_libraries(
+    tinybit
+    pico_stdlib
+    hardware_pio
+    hardware_interp
+    hardware_dma
+    tinybit_lib
+    no-OS-FatFS-SD-SDIO-SPI-RPi-Pico
+)
 # Increase heap size for Lua
 # With TinyBitMemory (80KB), we have limited RAM left
 target_compile_definitions(tinybit PRIVATE

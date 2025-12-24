@@ -7,6 +7,10 @@
 #include "main.h"
 #include "cartridge.h"
 
+#include "hw_config.h"
+#include "f_util.h"
+#include "ff.h"
+
 struct TinyBitMemory tb_mem = {0};
 bool button_state[TB_BUTTON_COUNT] = {0};
 
@@ -30,6 +34,34 @@ int main() {
     stdio_init_all();
 
     printf("TinyBit on ST7789 LCD Demo\n");
+
+    // See FatFs - Generic FAT Filesystem Module, "Application Interface",
+    // http://elm-chan.org/fsw/ff/00index_e.html
+    FATFS fs;
+    FRESULT fr = f_mount(&fs, "", 1);
+    if (FR_OK != fr) {
+        panic("f_mount error: %s (%d)\n", FRESULT_str(fr), fr);
+    }
+
+    // Open a file and write to it
+    FIL fil;
+    const char* const filename = "filename.txt";
+    fr = f_open(&fil, filename, FA_OPEN_APPEND | FA_WRITE);
+    if (FR_OK != fr && FR_EXIST != fr) {
+        panic("f_open(%s) error: %s (%d)\n", filename, FRESULT_str(fr), fr);
+    }
+    if (f_printf(&fil, "Hello, world!\n") < 0) {
+        printf("f_printf failed\n");
+    }
+
+    // Close the file
+    fr = f_close(&fil);
+    if (FR_OK != fr) {
+        printf("f_close error: %s (%d)\n", FRESULT_str(fr), fr);
+    }
+
+    // Unmount the SD card
+    f_unmount("");
 
     // Initialize LCD display
     lcd_init_display();
