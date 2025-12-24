@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <pico/stdlib.h>
+#include <pico/multicore.h>
 #include <hardware/clocks.h>
 #include "main.h"
 #include "cartridge.h"
@@ -131,7 +132,11 @@ int main() {
     //     while (1) printf("Failed to load cartridge!\n");
     // }
 
-    // Start game loop
+    // Launch core1 for LCD output
+    printf("Starting core1 for LCD rendering...\n");
+    multicore_launch_core1(core1_lcd_loop);
+
+    // Start game loop on core0
     tinybit_start();
     tinybit_loop();
     return 0;

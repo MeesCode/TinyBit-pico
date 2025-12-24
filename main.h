@@ -17,5 +17,7 @@ void sleep_ms_wrapper(int ms);
 // LCD functions (implemented in st7789_lcd.c)
 void lcd_init_display(void);
 void render_frame(void);
+void render_frame_blocking(void);
+void core1_lcd_loop(void);
 
 #endif // MAIN_H

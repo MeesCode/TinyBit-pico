@@ -54,6 +54,7 @@ pico_generate_pio_header(tinybit ${CMAKE_CURRENT_LIST_DIR}/st7789_lcd.pio)
 target_link_libraries(
     tinybit
     pico_stdlib
+    pico_multicore
     hardware_pio
     hardware_interp
     hardware_dma

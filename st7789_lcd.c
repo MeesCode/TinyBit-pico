@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
+#include "pico/multicore.h"
 #include "hardware/pio.h"
 #include "hardware/gpio.h"
 #include "hardware/interp.h"
@@ -33,6 +34,13 @@
 static uint8_t scanline_buf[2][SCREEN_WIDTH * 2];
 static int dma_chan;
 static dma_channel_config dma_cfg;
+
+// Double buffer for frame data (128x128 RGBA4444 = 32KB each)
+static uint8_t frame_buffer[2][RENDER_WIDTH * RENDER_HEIGHT * 2];
+static volatile int display_buffer_idx = 0;  // Buffer being displayed by core1
+static volatile int render_buffer_idx = 1;   // Buffer being rendered to by core0
+static volatile bool frame_ready = false;    // Signal from core0 to core1
+static volatile bool core1_running = false;  // Core1 status flag
 
 #define PIN_DIN 0
 #define PIN_CLK 1
@@ -122,9 +130,9 @@ void lcd_init_display(void) {
     channel_config_set_write_increment(&dma_cfg, false);
 }
 
-static inline void build_scanline(uint8_t *buf, uint32_t src_y) {
+static inline void build_scanline_from_buffer(uint8_t *dest, const uint8_t *src_buffer, uint32_t src_y) {
     // Pre-compute row base pointer (optimization: move multiply out of inner loop)
-    const uint16_t *row_base = (const uint16_t *)&tb_mem.display[src_y * TB_SCREEN_WIDTH * 2];
+    const uint16_t *row_base = (const uint16_t *)&src_buffer[src_y * RENDER_WIDTH * 2];
 
     // Configure interpolator for X stepping
     interp0->accum[0] = 0;
@@ -149,12 +157,13 @@ static inline void build_scanline(uint8_t *buf, uint32_t src_y) {
                           ((b & 0xF0) >> 3);   // Blue
 
         // Store in big-endian order for LCD
-        buf[x * 2 + 0] = rgb565 >> 8;
-        buf[x * 2 + 1] = rgb565 & 0xFF;
+        dest[x * 2 + 0] = rgb565 >> 8;
+        dest[x * 2 + 1] = rgb565 & 0xFF;
     }
 }
 
-void render_frame(void) {
+// Internal function to send a frame buffer to the LCD
+static void send_frame_to_lcd(const uint8_t *src_buffer) {
     st7789_start_pixels(pio, sm);
 
     // Configure interpolator once per frame
@@ -166,7 +175,7 @@ void render_frame(void) {
 
     // Build first scanline
     uint32_t src_y = 0;
-    build_scanline(scanline_buf[current_buf], src_y);
+    build_scanline_from_buffer(scanline_buf[current_buf], src_buffer, src_y);
 
     for (int y = 0; y < SCREEN_HEIGHT; y++) {
         // Start DMA transfer of current scanline
@@ -185,10 +194,57 @@ void render_frame(void) {
         if (y < SCREEN_HEIGHT - 1) {
             // Calculate source Y for next line
             src_y = ((y + 1) * SCALE_Y) >> FRAC_BITS;
-            build_scanline(scanline_buf[current_buf], src_y);
+            build_scanline_from_buffer(scanline_buf[current_buf], src_buffer, src_y);
         }
 
         // Wait for DMA to complete before reusing buffer
         dma_channel_wait_for_finish_blocking(dma_chan);
     }
+}
+
+// Core1 entry point - runs LCD output loop continuously
+void core1_lcd_loop(void) {
+    core1_running = true;
+
+    while (1) {
+        // Wait for a new frame to be ready
+        while (!frame_ready) {
+            tight_loop_contents();
+        }
+
+        // Swap buffers atomically
+        int buf_to_display = render_buffer_idx;
+        render_buffer_idx = display_buffer_idx;
+        display_buffer_idx = buf_to_display;
+
+        // Clear the flag so core0 can render the next frame
+        frame_ready = false;
+
+        // Send the frame to LCD (this takes ~10ms)
+        send_frame_to_lcd(frame_buffer[buf_to_display]);
+    }
+}
+
+// Get pointer to the current render buffer (for core0 to write to)
+uint8_t* get_render_buffer(void) {
+    return frame_buffer[render_buffer_idx];
+}
+
+// Signal that a frame is ready and wait for buffer swap
+void render_frame(void) {
+    // Copy display data to render buffer
+    memcpy(frame_buffer[render_buffer_idx], tb_mem.display, RENDER_WIDTH * RENDER_HEIGHT * 2);
+
+    // Signal core1 that frame is ready
+    frame_ready = true;
+
+    // Wait for core1 to swap buffers (so we don't overwrite the buffer it's reading)
+    while (frame_ready) {
+        tight_loop_contents();
+    }
+}
+
+// Legacy blocking render for use before core1 is started
+void render_frame_blocking(void) {
+    send_frame_to_lcd(tb_mem.display);
 }
