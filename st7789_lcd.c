@@ -40,7 +40,6 @@ static uint8_t frame_buffer[2][RENDER_WIDTH * RENDER_HEIGHT * 2];
 static volatile int display_buffer_idx = 0;  // Buffer being displayed by core1
 static volatile int render_buffer_idx = 1;   // Buffer being rendered to by core0
 static volatile bool frame_ready = false;    // Signal from core0 to core1
-static volatile bool core1_running = false;  // Core1 status flag
 
 #define PIN_DIN 0
 #define PIN_CLK 1
@@ -131,120 +130,96 @@ void lcd_init_display(void) {
 }
 
 static inline void build_scanline_from_buffer(uint8_t *dest, const uint8_t *src_buffer, uint32_t src_y) {
-    // Pre-compute row base pointer (optimization: move multiply out of inner loop)
     const uint16_t *row_base = (const uint16_t *)&src_buffer[src_y * RENDER_WIDTH * 2];
 
-    // Configure interpolator for X stepping
     interp0->accum[0] = 0;
     interp0->base[0] = SCALE_X;
 
     for (int x = 0; x < SCREEN_WIDTH; x++) {
-        // Get source X from accumulator (no clamp needed - scale factor ensures valid range)
         uint32_t src_x = interp0->accum[0] >> FRAC_BITS;
-        (void)interp0->pop[0];  // Advance accumulator by SCALE_X
+        (void)interp0->pop[0];
 
-        // Read pixel as 16-bit (optimization: single memory access instead of two)
         uint16_t pixel = row_base[src_x];
 
-        // Extract RGBA4444 components and convert to RGB565
-        // pixel format: RRRRGGGG BBBBAAAA
         uint8_t r = (pixel >> 0) & 0xf0;
         uint8_t g = (pixel << 4) & 0xf0;
         uint8_t b = (pixel >> 8) & 0xf0;
 
-        uint16_t rgb565 = ((r & 0xF0) << 8) |  // Red
-                          ((g & 0xF0) << 3) |  // Green
-                          ((b & 0xF0) >> 3);   // Blue
+        uint16_t rgb565 = ((r & 0xF0) << 8) |
+                          ((g & 0xF0) << 3) |
+                          ((b & 0xF0) >> 3);
 
-        // Store in big-endian order for LCD
         dest[x * 2 + 0] = rgb565 >> 8;
         dest[x * 2 + 1] = rgb565 & 0xFF;
     }
 }
 
-// Internal function to send a frame buffer to the LCD
+// Send frame buffer to LCD with scanline double-buffering
 static void send_frame_to_lcd(const uint8_t *src_buffer) {
     st7789_start_pixels(pio, sm);
 
-    // Configure interpolator once per frame
     interp_config cfg = interp_default_config();
     interp_config_set_add_raw(&cfg, true);
     interp_set_config(interp0, 0, &cfg);
 
     int current_buf = 0;
-
-    // Build first scanline
     uint32_t src_y = 0;
     build_scanline_from_buffer(scanline_buf[current_buf], src_buffer, src_y);
 
     for (int y = 0; y < SCREEN_HEIGHT; y++) {
-        // Start DMA transfer of current scanline
         dma_channel_configure(
             dma_chan,
             &dma_cfg,
-            &pio->txf[sm],              // Write to PIO TX FIFO
-            scanline_buf[current_buf],   // Read from scanline buffer
-            SCREEN_WIDTH * 2,            // Transfer count (bytes)
-            true                         // Start immediately
+            &pio->txf[sm],
+            scanline_buf[current_buf],
+            SCREEN_WIDTH * 2,
+            true
         );
 
-        // Switch to other buffer and build next scanline while DMA runs
         current_buf = 1 - current_buf;
 
         if (y < SCREEN_HEIGHT - 1) {
-            // Calculate source Y for next line
             src_y = ((y + 1) * SCALE_Y) >> FRAC_BITS;
             build_scanline_from_buffer(scanline_buf[current_buf], src_buffer, src_y);
         }
 
-        // Wait for DMA to complete before reusing buffer
         dma_channel_wait_for_finish_blocking(dma_chan);
     }
 }
 
-// Core1 entry point - runs LCD output loop continuously
+// Core1 entry point - runs LCD output loop
 void core1_lcd_loop(void) {
-    core1_running = true;
-
     while (1) {
-        // Wait for a new frame to be ready
         while (!frame_ready) {
             tight_loop_contents();
         }
 
-        // Swap buffers atomically
+        // Swap buffers
         int buf_to_display = render_buffer_idx;
         render_buffer_idx = display_buffer_idx;
         display_buffer_idx = buf_to_display;
 
-        // Clear the flag so core0 can render the next frame
         frame_ready = false;
 
-        // Send the frame to LCD (this takes ~10ms)
         send_frame_to_lcd(frame_buffer[buf_to_display]);
     }
 }
 
-// Get pointer to the current render buffer (for core0 to write to)
-uint8_t* get_render_buffer(void) {
-    return frame_buffer[render_buffer_idx];
-}
-
-// Signal that a frame is ready and wait for buffer swap
+// Signal frame ready - non-blocking for Lua
 void render_frame(void) {
-    // Copy display data to render buffer
-    memcpy(frame_buffer[render_buffer_idx], tb_mem.display, RENDER_WIDTH * RENDER_HEIGHT * 2);
-
-    // Signal core1 that frame is ready
-    frame_ready = true;
-
-    // Wait for core1 to swap buffers (so we don't overwrite the buffer it's reading)
+    // Wait only if core1 hasn't picked up previous frame
     while (frame_ready) {
         tight_loop_contents();
     }
+
+    // Copy to render buffer
+    memcpy(frame_buffer[render_buffer_idx], tb_mem.display, RENDER_WIDTH * RENDER_HEIGHT * 2);
+
+    // Signal and return immediately
+    frame_ready = true;
 }
 
-// Legacy blocking render for use before core1 is started
+// Legacy blocking render
 void render_frame_blocking(void) {
     send_frame_to_lcd(tb_mem.display);
 }
