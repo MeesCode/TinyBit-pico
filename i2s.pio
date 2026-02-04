@@ -1,0 +1,113 @@
+;
+; I2S audio output using PIO
+;
+; Pin assignments:
+;   - DIN (data out): side-set pin 0
+;   - BCLK (bit clock): OUT pin 0
+;   - LRCLK (word select): OUT pin 1
+;
+; This program outputs 16-bit stereo audio data in I2S format.
+; Data is clocked out MSB first, with LRCLK low for left channel
+; and high for right channel.
+;
+
+.pio_version 0
+
+.program i2s_out
+.side_set 1
+
+; I2S transmitter - outputs 16-bit stereo samples
+; Uses autopull with 32-bit threshold (one stereo sample per pull)
+; Bit clock on side-set, data on OUT pins
+; Word select (LRCLK) is controlled via SET pins
+
+; Format: Left channel (16 bits), Right channel (16 bits)
+; LRCLK changes one bit clock before the MSB
+
+.wrap_target
+public entry_point:
+    ; Output left channel (16 bits)
+    set pins, 0             side 0      ; LRCLK low for left channel
+    set x, 14               side 0      ; 15 bits to output (will do 16 total with first)
+    out pins, 1             side 0      ; Output first bit (MSB) on falling edge
+left_loop:
+    nop                     side 1      ; Rising edge - data sampled by receiver
+    out pins, 1             side 0      ; Output next bit on falling edge
+    jmp x-- left_loop       side 0      ; Loop for remaining bits
+    nop                     side 1      ; Final rising edge for last bit
+
+    ; Output right channel (16 bits)
+    set pins, 1             side 0      ; LRCLK high for right channel
+    set x, 14               side 0      ; 15 bits to output
+    out pins, 1             side 0      ; Output first bit (MSB) on falling edge
+right_loop:
+    nop                     side 1      ; Rising edge - data sampled by receiver
+    out pins, 1             side 0      ; Output next bit on falling edge
+    jmp x-- right_loop      side 0      ; Loop for remaining bits
+    nop                     side 1      ; Final rising edge for last bit
+.wrap
+
+% c-sdk {
+#include "hardware/clocks.h"
+#include "hardware/gpio.h"
+
+static inline void i2s_out_program_init(PIO pio, uint sm, uint offset, uint din_pin, uint bclk_pin, uint lrclk_pin, uint sample_rate) {
+    // Initialize GPIO pins for PIO
+    pio_gpio_init(pio, din_pin);
+    pio_gpio_init(pio, bclk_pin);
+    pio_gpio_init(pio, lrclk_pin);
+
+    // Set pin directions to output
+    pio_sm_set_consecutive_pindirs(pio, sm, din_pin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, bclk_pin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, lrclk_pin, 1, true);
+
+    // Get default config
+    pio_sm_config c = i2s_out_program_get_default_config(offset);
+
+    // Configure OUT pins for data (din_pin)
+    sm_config_set_out_pins(&c, din_pin, 1);
+
+    // Configure side-set for BCLK
+    sm_config_set_sideset_pins(&c, bclk_pin);
+
+    // Configure SET pins for LRCLK
+    sm_config_set_set_pins(&c, lrclk_pin, 1);
+
+    // Configure output shift: shift left, autopull at 32 bits (one stereo sample)
+    sm_config_set_out_shift(&c, false, true, 32);
+
+    // Join FIFOs for TX only (8 entries instead of 4)
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    // Calculate clock divider for desired sample rate
+    // Each sample needs 32 bit clocks (16 left + 16 right)
+    // Each bit needs ~2 PIO cycles (data + clock toggle)
+    // So we need: sys_clock / (sample_rate * 32 * cycles_per_bit)
+    // With our program, cycles_per_bit is about 2
+    float div = (float)clock_get_hz(clk_sys) / (sample_rate * 32 * 2);
+    sm_config_set_clkdiv(&c, div);
+
+    // Initialize and enable state machine
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+// Get the number of free slots in TX FIFO
+static inline uint i2s_out_get_fifo_free(PIO pio, uint sm) {
+    return 8 - pio_sm_get_tx_fifo_level(pio, sm);
+}
+
+// Push a stereo sample (left in upper 16 bits, right in lower 16 bits)
+static inline void i2s_out_push_sample(PIO pio, uint sm, uint32_t sample) {
+    while (pio_sm_is_tx_fifo_full(pio, sm))
+        tight_loop_contents();
+    pio->txf[sm] = sample;
+}
+
+// Check if FIFO is ready for more data
+static inline bool i2s_out_fifo_ready(PIO pio, uint sm) {
+    return !pio_sm_is_tx_fifo_full(pio, sm);
+}
+
+%}

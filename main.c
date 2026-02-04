@@ -16,9 +16,13 @@
 #include "hw_config.h"
 #include "f_util.h"
 #include "ff.h"
+#include "i2s.h"
 
 struct TinyBitMemory tb_mem = {0};
 bool button_state[TB_BUTTON_COUNT] = {0};
+
+// Pre-allocated audio buffer (mono samples for one frame)
+static int16_t audio_buffer[TB_AUDIO_FRAME_SAMPLES];
 
 // Filesystem state (kept mounted for game loading)
 static FATFS fs;
@@ -139,6 +143,12 @@ void sleep_ms_wrapper(int ms) {
     sleep_ms(ms);
 }
 
+// Audio queue callback - called from game loop after process_audio() fills the buffer
+void audio_queue_handler(void) {
+    // Queue the audio buffer to the I2S driver for playback
+    i2s_queue_mono_samples(audio_buffer, TB_AUDIO_FRAME_SAMPLES);
+}
+
 int main() {
     stdio_init_all();
 
@@ -164,6 +174,9 @@ int main() {
     // Initialize LCD display
     lcd_init_display();
 
+    // Initialize I2S audio output
+    i2s_init();
+
     // Mount SD card filesystem (keep mounted for game loading)
     FRESULT fr = f_mount(&fs, "", 1);
     if (FR_OK != fr) {
@@ -181,13 +194,17 @@ int main() {
     tinybit_poll_input_cb(tinybit_poll_input);
     tinybit_sleep_cb(sleep_ms_wrapper);
     tinybit_get_ticks_ms_cb(to_ms);
+    tinybit_audio_queue_cb(audio_queue_handler);
 
     // Initialize TinyBit (starts game selector menu)
-    tinybit_init(&tb_mem, button_state);
+    tinybit_init(&tb_mem, button_state, audio_buffer);
 
     // Launch core1 for LCD output
     printf("Starting core1 for LCD rendering...\n");
     multicore_launch_core1(core1_lcd_loop);
+
+    // Start I2S audio output
+    i2s_start();
 
     // Start game loop on core0
     tinybit_start();

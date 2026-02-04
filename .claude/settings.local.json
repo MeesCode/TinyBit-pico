@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(cmake --build:*)",
-      "Bash(arm-none-eabi-size:*)"
+      "Bash(arm-none-eabi-size:*)",
+      "Bash(git submodule:*)",
+      "Bash(tree:*)"
     ]
   }
 }

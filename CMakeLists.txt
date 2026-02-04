@@ -46,9 +46,11 @@ add_executable(tinybit
     st7789_lcd.c
     syscalls.c
     hw_config.c
+    i2s.c
 )
 
 pico_generate_pio_header(tinybit ${CMAKE_CURRENT_LIST_DIR}/st7789_lcd.pio)
+pico_generate_pio_header(tinybit ${CMAKE_CURRENT_LIST_DIR}/i2s.pio)
 
 # pull in common dependencies
 target_link_libraries(
