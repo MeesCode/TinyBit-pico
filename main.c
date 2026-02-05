@@ -145,8 +145,11 @@ void sleep_ms_wrapper(int ms) {
 
 // Audio queue callback - called from game loop after process_audio() fills the buffer
 void audio_queue_handler(void) {
-    // Queue the audio buffer to the I2S driver for playback
-    i2s_queue_mono_samples(audio_buffer, TB_AUDIO_FRAME_SAMPLES);
+    // Only queue if I2S is ready (double-buffer not full)
+    if (i2s_buffer_ready()) {
+        i2s_queue_mono_samples(audio_buffer, TB_AUDIO_FRAME_SAMPLES);
+    }
+    // If not ready, this frame's audio is dropped (acceptable at 60fps)
 }
 
 int main() {

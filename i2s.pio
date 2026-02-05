@@ -81,10 +81,7 @@ static inline void i2s_out_program_init(PIO pio, uint sm, uint offset, uint din_
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
     // Calculate clock divider for desired sample rate
-    // Each sample needs 32 bit clocks (16 left + 16 right)
-    // Each bit needs ~2 PIO cycles (data + clock toggle)
-    // So we need: sys_clock / (sample_rate * 32 * cycles_per_bit)
-    // With our program, cycles_per_bit is about 2
+    // Using 32*2 as empirical cycles-per-sample value
     float div = (float)clock_get_hz(clk_sys) / (sample_rate * 32 * 2);
     sm_config_set_clkdiv(&c, div);
 
