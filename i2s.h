@@ -7,9 +7,9 @@
 #include "hardware/dma.h"
 
 // I2S pin definitions
-#define I2S_PIN_DIN     9
+#define I2S_PIN_DIN     7
 #define I2S_PIN_BCLK    8
-#define I2S_PIN_LRCLK   7
+#define I2S_PIN_LRCLK   9
 
 // Audio configuration
 #define I2S_SAMPLE_RATE     22000

@@ -45,6 +45,42 @@ static void i2s_dma_irq_handler(void) {
     }
 }
 
+void i2s_out_program_init(PIO pio, uint sm, uint offset, uint din_pin, uint bclk_pin, uint lrclk_pin, uint sample_rate) {
+    // Initialize GPIO pins for PIO
+    pio_gpio_init(pio, din_pin);
+    pio_gpio_init(pio, bclk_pin);
+    pio_gpio_init(pio, lrclk_pin);
+
+    // Set pin directions to output
+    pio_sm_set_consecutive_pindirs(pio, sm, din_pin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, bclk_pin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, lrclk_pin, 1, true);
+
+    // Get default config
+    pio_sm_config c = i2s_out_program_get_default_config(offset);
+
+    // Configure OUT pins for data (din_pin)
+    sm_config_set_out_pins(&c, din_pin, 1);
+
+    // Configure side-set for BCLK
+    sm_config_set_sideset_pin_base(&c, bclk_pin);
+
+    // Configure output shift: shift left, autopull at 32 bits (one stereo sample)
+    sm_config_set_out_shift(&c, false, true, 32);
+
+    // Join FIFOs for TX only (8 entries instead of 4)
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    // Calculate clock divider for desired sample rate
+    // Using 32*2 as empirical cycles-per-sample value
+    float div = (float)clock_get_hz(clk_sys) / (sample_rate * 32 * 2);
+    sm_config_set_clkdiv(&c, div);
+
+    // Initialize and enable state machine
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
 void i2s_init(void) {
     // Add I2S program to PIO
     i2s_pio_offset = pio_add_program(i2s_pio, &i2s_out_program);
