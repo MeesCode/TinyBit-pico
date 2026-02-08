@@ -218,8 +218,3 @@ void render_frame(void) {
     // Signal and return immediately
     frame_ready = true;
 }
-
-// Legacy blocking render
-void render_frame_blocking(void) {
-    send_frame_to_lcd(tb_mem.display);
-}

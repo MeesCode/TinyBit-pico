@@ -17,13 +17,12 @@ static dma_channel_config i2s_dma_config;
 
 // Double-buffering for DMA (ping-pong buffers)
 // Max size based on TB_AUDIO_FRAME_SAMPLES (22000/60 = ~367 samples)
-#define I2S_CONVERSION_BUFFER_SIZE 512
+#define I2S_CONVERSION_BUFFER_SIZE (TB_AUDIO_FRAME_SAMPLES * 2)  // Stereo samples (mono duplicated)
 static uint32_t conversion_buffer_a[I2S_CONVERSION_BUFFER_SIZE];
 static uint32_t conversion_buffer_b[I2S_CONVERSION_BUFFER_SIZE];
 static uint32_t* active_dma_buffer = conversion_buffer_a;  // Buffer DMA reads from
 static uint32_t* fill_buffer = conversion_buffer_b;        // Buffer CPU writes to
 static volatile bool new_buffer_ready = false;             // New data ready to swap
-static uint32_t current_sample_count = 0;
 
 // DMA interrupt handler - swap buffers when transfer completes
 static void i2s_dma_irq_handler(void) {
@@ -64,6 +63,7 @@ void i2s_out_program_init(PIO pio, uint sm, uint offset, uint din_pin, uint bclk
 
     // Configure side-set for BCLK
     sm_config_set_sideset_pin_base(&c, bclk_pin);
+    // LRCLK is set automatically as it is the next pin after BCLK (bclk_pin + 1)
 
     // Configure output shift: shift left, autopull at 32 bits (one stereo sample)
     sm_config_set_out_shift(&c, false, true, 32);
@@ -144,7 +144,6 @@ void i2s_queue_mono_samples(int16_t* buffer, uint32_t sample_count) {
         uint16_t sample = (uint16_t)buffer[i];
         fill_buffer[i] = ((uint32_t)sample << 16) | sample;
     }
-    current_sample_count = sample_count;
 
     // Check if DMA is running
     bool dma_busy = dma_channel_is_busy(i2s_dma_channel);

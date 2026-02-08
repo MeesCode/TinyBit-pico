@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "hardware/pio.h"
 #include "hardware/dma.h"
+#include "TinyBit-lib/tinybit.h"
 
 // I2S pin definitions
 #define I2S_PIN_DIN     7
