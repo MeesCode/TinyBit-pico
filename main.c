@@ -145,11 +145,7 @@ void sleep_ms_wrapper(int ms) {
 
 // Audio queue callback - called from game loop after process_audio() fills the buffer
 void audio_queue_handler(void) {
-    // Only queue if I2S is ready (double-buffer not full)
-    if (i2s_buffer_ready()) {
-        i2s_queue_mono_samples(audio_buffer, TB_AUDIO_FRAME_SAMPLES);
-    }
-    // If not ready, this frame's audio is dropped (acceptable at 60fps)
+    i2s_queue_mono_samples(audio_buffer, TB_AUDIO_FRAME_SAMPLES);
 }
 
 int main() {
@@ -205,9 +201,6 @@ int main() {
     // Launch core1 for LCD output
     printf("Starting core1 for LCD rendering...\n");
     multicore_launch_core1(core1_lcd_loop);
-
-    // Start I2S audio output
-    i2s_start();
 
     // Start game loop on core0
     tinybit_start();
