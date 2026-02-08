@@ -20,7 +20,7 @@ static uint32_t conversion_buffer[I2S_CONVERSION_BUFFER_SIZE];
 
 void i2s_out_program_init(PIO pio, uint sm, uint offset, uint din_pin, uint bclk_pin, uint sample_rate) {
     uint lrclk_pin = bclk_pin + 1; // LRCLK must be adjacent to BCLK
-    
+
     pio_gpio_init(pio, din_pin);
     pio_gpio_init(pio, bclk_pin);
     pio_gpio_init(pio, lrclk_pin);

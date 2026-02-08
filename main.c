@@ -17,12 +17,17 @@
 #include "f_util.h"
 #include "ff.h"
 #include "i2s.h"
+#include "st7789_lcd.h"
+
+volatile bool frame_ready = false;    // Signal from core0 to core1
+volatile bool audio_ready = false;    // Signal from core0 to core1
 
 struct TinyBitMemory tb_mem = {0};
 bool button_state[TB_BUTTON_COUNT] = {0};
 
 // Pre-allocated audio buffer (mono samples for one frame)
 static int16_t audio_buffer[TB_AUDIO_FRAME_SAMPLES];
+static int16_t audio_buffer2[TB_AUDIO_FRAME_SAMPLES];
 
 // Filesystem state (kept mounted for game loading)
 static FATFS fs;
@@ -143,9 +148,31 @@ void sleep_ms_wrapper(int ms) {
     sleep_ms(ms);
 }
 
-// Audio queue callback - called from game loop after process_audio() fills the buffer
 void audio_queue_handler(void) {
-    i2s_queue_mono_samples(audio_buffer, TB_AUDIO_FRAME_SAMPLES);
+    memcpy(audio_buffer2, audio_buffer, sizeof(audio_buffer2));
+    audio_ready = true;
+}
+
+void core1_loop(void) {
+    while(1) {
+
+        if(!frame_ready && !audio_ready) {
+            tight_loop_contents();
+            continue;
+        }
+
+        if(frame_ready) {
+            // printf("Rendering frame to LCD...\n");
+            send_frame_to_lcd();
+            frame_ready = false;
+        }
+
+        if(audio_ready) {
+            // printf("Queueing audio frame...\n");
+            i2s_queue_mono_samples(audio_buffer2, TB_AUDIO_FRAME_SAMPLES);
+            audio_ready = false;
+        }
+    }
 }
 
 int main() {
@@ -198,9 +225,8 @@ int main() {
     // Initialize TinyBit (starts game selector menu)
     tinybit_init(&tb_mem, button_state, audio_buffer);
 
-    // Launch core1 for LCD output
-    printf("Starting core1 for LCD rendering...\n");
-    multicore_launch_core1(core1_lcd_loop);
+    // Launch core1
+    multicore_launch_core1(core1_loop);
 
     // Start game loop on core0
     tinybit_start();

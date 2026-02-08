@@ -39,7 +39,6 @@ static dma_channel_config dma_cfg;
 static uint8_t frame_buffer[2][RENDER_WIDTH * RENDER_HEIGHT * 2];
 static volatile int display_buffer_idx = 0;  // Buffer being displayed by core1
 static volatile int render_buffer_idx = 1;   // Buffer being rendered to by core0
-static volatile bool frame_ready = false;    // Signal from core0 to core1
 
 #define PIN_DIN 0
 #define PIN_CLK 1
@@ -155,7 +154,14 @@ static inline void build_scanline_from_buffer(uint8_t *dest, const uint8_t *src_
 }
 
 // Send frame buffer to LCD with scanline double-buffering
-static void send_frame_to_lcd(const uint8_t *src_buffer) {
+void send_frame_to_lcd() {
+    // Swap buffers
+    int buf_to_display = render_buffer_idx;
+    render_buffer_idx = display_buffer_idx;
+    display_buffer_idx = buf_to_display;
+
+    uint8_t* src_buffer = frame_buffer[buf_to_display];
+
     st7789_start_pixels(pio, sm);
 
     interp_config cfg = interp_default_config();
@@ -187,31 +193,8 @@ static void send_frame_to_lcd(const uint8_t *src_buffer) {
     }
 }
 
-// Core1 entry point - runs LCD output loop
-void core1_lcd_loop(void) {
-    while (1) {
-        while (!frame_ready) {
-            tight_loop_contents();
-        }
-
-        // Swap buffers
-        int buf_to_display = render_buffer_idx;
-        render_buffer_idx = display_buffer_idx;
-        display_buffer_idx = buf_to_display;
-
-        frame_ready = false;
-
-        send_frame_to_lcd(frame_buffer[buf_to_display]);
-    }
-}
-
 // Signal frame ready - non-blocking for Lua
 void render_frame(void) {
-    // Wait only if core1 hasn't picked up previous frame
-    while (frame_ready) {
-        tight_loop_contents();
-    }
-
     // Copy to render buffer
     memcpy(frame_buffer[render_buffer_idx], tb_mem.display, RENDER_WIDTH * RENDER_HEIGHT * 2);
 

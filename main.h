@@ -8,6 +8,9 @@
 extern struct TinyBitMemory tb_mem;
 extern bool button_state[TB_BUTTON_COUNT];
 
+extern volatile bool frame_ready;
+extern volatile bool audio_ready;
+
 // Callback functions for TinyBit
 void tinybit_poll_input(void);
 int to_ms(void);
