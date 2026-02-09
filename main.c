@@ -156,11 +156,6 @@ void audio_queue_handler(void) {
 void core1_loop(void) {
     while(1) {
 
-        if(!frame_ready && !audio_ready) {
-            tight_loop_contents();
-            continue;
-        }
-
         if(frame_ready) {
             // printf("Rendering frame to LCD...\n");
             send_frame_to_lcd();
@@ -172,6 +167,8 @@ void core1_loop(void) {
             i2s_queue_mono_samples(audio_buffer2, TB_AUDIO_FRAME_SAMPLES);
             audio_ready = false;
         }
+
+        tight_loop_contents();
     }
 }
 
