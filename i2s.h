@@ -22,6 +22,6 @@ void i2s_init(void);
 // Queue mono audio samples for playback (will be duplicated to both channels)
 // buffer: pointer to int16_t mono samples
 // sample_count: number of samples
-void i2s_queue_mono_samples(int16_t* buffer, uint32_t sample_count);
+void i2s_queue_samples(int16_t* buffer, uint32_t sample_count);
 
 #endif // I2S_H

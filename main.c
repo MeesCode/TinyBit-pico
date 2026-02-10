@@ -130,7 +130,7 @@ void tinybit_poll_input(void) {
     // Example: Read GPIO pins and update button_state array
     button_state[TB_BUTTON_A] = gpio_get(17); 
     button_state[TB_BUTTON_B] = gpio_get(16); 
-    button_state[TB_BUTTON_UP] = gpio_get(21); 
+    button_state[TB_BUTTON_UP] = gpio_get(16); // 21 
     button_state[TB_BUTTON_DOWN] = gpio_get(19); 
     button_state[TB_BUTTON_LEFT] = gpio_get(18); 
     button_state[TB_BUTTON_RIGHT] = gpio_get(20); 
@@ -150,25 +150,17 @@ void sleep_ms_wrapper(int ms) {
 
 void audio_queue_handler(void) {
     memcpy(audio_buffer2, audio_buffer, sizeof(audio_buffer2));
-    audio_ready = true;
+    i2s_queue_samples(audio_buffer2, TB_AUDIO_FRAME_SAMPLES);
 }
 
 void core1_loop(void) {
     while(1) {
 
         if(frame_ready) {
-            // printf("Rendering frame to LCD...\n");
             send_frame_to_lcd();
             frame_ready = false;
         }
 
-        if(audio_ready) {
-            // printf("Queueing audio frame...\n");
-            i2s_queue_mono_samples(audio_buffer2, TB_AUDIO_FRAME_SAMPLES);
-            audio_ready = false;
-        }
-
-        tight_loop_contents();
     }
 }
 
@@ -227,6 +219,9 @@ int main() {
 
     // Start game loop on core0
     tinybit_start();
+
+    while(1) {
     tinybit_loop();
+    }
     return 0;
 }

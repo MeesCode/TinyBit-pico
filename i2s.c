@@ -60,22 +60,16 @@ void i2s_out_program_init(PIO pio, uint sm, uint offset, uint din_pin, uint bclk
 
 // DMA interrupt handler - swap buffers when transfer completes
 static void i2s_dma_irq_handler(void) {
-    if (dma_channel_get_irq0_status(i2s_dma_channel)) {
-        dma_channel_acknowledge_irq0(i2s_dma_channel);
+    dma_channel_acknowledge_irq0(i2s_dma_channel);
 
-        // Only restart if new buffer is ready (prevents stale audio replay)
-        if (new_buffer_ready) {
-            // Swap buffers
-            uint32_t* temp = active_dma_buffer;
-            active_dma_buffer = fill_buffer;
-            fill_buffer = temp;
-            new_buffer_ready = false;
+    // Swap buffers
+    uint32_t* temp = active_dma_buffer;
+    active_dma_buffer = fill_buffer;
+    fill_buffer = temp;
+    new_buffer_ready = false;
 
-            // Restart DMA with fresh buffer
-            dma_channel_set_read_addr(i2s_dma_channel, active_dma_buffer, true);
-        }
-        // If no new buffer, DMA stops - silence until next buffer arrives
-    }
+    // Restart DMA with fresh buffer
+    dma_channel_set_read_addr(i2s_dma_channel, active_dma_buffer, true);
 }
 
 void i2s_init(void) {
@@ -115,12 +109,13 @@ void i2s_init(void) {
     pio_sm_set_enabled(i2s_pio, i2s_sm, true);
 }
 
-void i2s_queue_mono_samples(int16_t* buffer, uint32_t sample_count) {
+void i2s_queue_samples(int16_t* buffer, uint32_t sample_count) {
     if (i2s_dma_channel < 0 || !buffer || sample_count == 0) return;
 
-    // Limit to conversion buffer size
-    if (sample_count > I2S_CONVERSION_BUFFER_SIZE) {
-        sample_count = I2S_CONVERSION_BUFFER_SIZE;
+    // wait for second buffer to be free if we're still processing the previous one
+    // since this task runs in the main loop, fps is limited to audio playback
+    while(new_buffer_ready) {
+        tight_loop_contents(); 
     }
 
     // Convert mono to stereo into the fill buffer
@@ -154,9 +149,4 @@ void i2s_queue_mono_samples(int16_t* buffer, uint32_t sample_count) {
         );
     }
     // If DMA is running, interrupt handler will swap when current transfer completes
-}
-
-bool i2s_buffer_ready(void) {
-    // Ready if fill buffer is not pending (already swapped or DMA idle)
-    return !new_buffer_ready;
 }
