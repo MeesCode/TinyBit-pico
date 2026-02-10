@@ -36,7 +36,6 @@ static int dma_chan;
 static dma_channel_config dma_cfg;
 
 // Double buffer for frame data (128x128 RGBA4444 = 32KB each)
-static uint8_t frame_buffer[2][RENDER_WIDTH * RENDER_HEIGHT * 2];
 static volatile int display_buffer_idx = 0;  // Buffer being displayed by core1
 static volatile int render_buffer_idx = 1;   // Buffer being rendered to by core0
 
@@ -155,12 +154,6 @@ static inline void build_scanline_from_buffer(uint8_t *dest, const uint8_t *src_
 
 // Send frame buffer to LCD with scanline double-buffering
 void send_frame_to_lcd() {
-    // Swap buffers
-    int buf_to_display = render_buffer_idx;
-    render_buffer_idx = display_buffer_idx;
-    display_buffer_idx = buf_to_display;
-
-    uint8_t* src_buffer = frame_buffer[buf_to_display];
 
     st7789_start_pixels(pio, sm);
 
@@ -170,7 +163,7 @@ void send_frame_to_lcd() {
 
     int current_buf = 0;
     uint32_t src_y = 0;
-    build_scanline_from_buffer(scanline_buf[current_buf], src_buffer, src_y);
+    build_scanline_from_buffer(scanline_buf[current_buf], temp_frame_buffer, src_y);
 
     for (int y = 0; y < SCREEN_HEIGHT; y++) {
         dma_channel_configure(
@@ -186,7 +179,7 @@ void send_frame_to_lcd() {
 
         if (y < SCREEN_HEIGHT - 1) {
             src_y = ((y + 1) * SCALE_Y) >> FRAC_BITS;
-            build_scanline_from_buffer(scanline_buf[current_buf], src_buffer, src_y);
+            build_scanline_from_buffer(scanline_buf[current_buf], temp_frame_buffer, src_y);
         }
 
         dma_channel_wait_for_finish_blocking(dma_chan);
@@ -196,7 +189,7 @@ void send_frame_to_lcd() {
 // Signal frame ready - non-blocking for Lua
 void render_frame(void) {
     // Copy to render buffer
-    memcpy(frame_buffer[render_buffer_idx], tb_mem.display, RENDER_WIDTH * RENDER_HEIGHT * 2);
+    memcpy(temp_frame_buffer, tb_mem.display, RENDER_WIDTH * RENDER_HEIGHT * 2);
 
     // Signal and return immediately
     frame_ready = true;

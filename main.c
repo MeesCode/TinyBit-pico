@@ -27,7 +27,10 @@ bool button_state[TB_BUTTON_COUNT] = {0};
 
 // Pre-allocated audio buffer (mono samples for one frame)
 static int16_t audio_buffer[TB_AUDIO_FRAME_SAMPLES];
-static int16_t audio_buffer2[TB_AUDIO_FRAME_SAMPLES];
+
+// Temporary buffers for frame and audio data to be processed
+int16_t temp_audio_buffer[TB_AUDIO_FRAME_SAMPLES];
+uint8_t temp_frame_buffer[TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2];
 
 // Filesystem state (kept mounted for game loading)
 static FATFS fs;
@@ -149,8 +152,14 @@ void sleep_ms_wrapper(int ms) {
 }
 
 void audio_queue_handler(void) {
-    memcpy(audio_buffer2, audio_buffer, sizeof(audio_buffer2));
-    i2s_queue_samples(audio_buffer2, TB_AUDIO_FRAME_SAMPLES);
+    memcpy(temp_audio_buffer, audio_buffer, sizeof(temp_audio_buffer));
+    i2s_queue_samples();
+}
+
+// Signal frame ready - non-blocking for Lua
+void render_frame_handler(void) {
+    memcpy(temp_frame_buffer, tb_mem.display, TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2);
+    frame_ready = true;
 }
 
 void core1_loop(void) {
@@ -205,7 +214,7 @@ int main() {
     tinybit_log_cb(log_printf);
     tinybit_gamecount_cb(sd_gamecount);
     tinybit_gameload_cb(sd_gameload);
-    tinybit_render_cb(render_frame);
+    tinybit_render_cb(render_frame_handler);
     tinybit_poll_input_cb(tinybit_poll_input);
     tinybit_sleep_cb(sleep_ms_wrapper);
     tinybit_get_ticks_ms_cb(to_ms);

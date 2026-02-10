@@ -6,6 +6,9 @@
 #include "hardware/clocks.h"
 #include <string.h>
 
+#include "main.h"
+
+
 // PIO and state machine configuration
 static PIO i2s_pio = pio1;  // Use PIO1 (PIO0 is used by LCD)
 static uint i2s_sm = 0;
@@ -109,8 +112,7 @@ void i2s_init(void) {
     pio_sm_set_enabled(i2s_pio, i2s_sm, true);
 }
 
-void i2s_queue_samples(int16_t* buffer, uint32_t sample_count) {
-    if (i2s_dma_channel < 0 || !buffer || sample_count == 0) return;
+void i2s_queue_samples() {
 
     // wait for second buffer to be free if we're still processing the previous one
     // since this task runs in the main loop, fps is limited to audio playback
@@ -120,11 +122,10 @@ void i2s_queue_samples(int16_t* buffer, uint32_t sample_count) {
 
     // Convert mono to stereo into the fill buffer
     // I2S format: left in upper 16 bits, right in lower 16 bits
-    for (uint32_t i = 0; i < sample_count; i++) {
-        uint16_t sample = (uint16_t)buffer[i];
+    for (uint32_t i = 0; i < TB_AUDIO_FRAME_SAMPLES; i++) {
+        uint16_t sample = (uint16_t)temp_audio_buffer[i];
         fill_buffer[i] = ((uint32_t)sample << 16) | sample;
     }
-    current_sample_count = sample_count;
 
     // Check if DMA is running
     bool dma_busy = dma_channel_is_busy(i2s_dma_channel);
@@ -144,7 +145,7 @@ void i2s_queue_samples(int16_t* buffer, uint32_t sample_count) {
             &i2s_dma_config,
             &i2s_pio->txf[i2s_sm],
             active_dma_buffer,
-            sample_count,
+            TB_AUDIO_FRAME_SAMPLES,
             true
         );
     }
