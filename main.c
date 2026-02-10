@@ -25,12 +25,11 @@ volatile bool audio_ready = false;    // Signal from core0 to core1
 struct TinyBitMemory tb_mem = {0};
 bool button_state[TB_BUTTON_COUNT] = {0};
 
-// Pre-allocated audio buffer (mono samples for one frame)
-static int16_t audio_buffer[TB_AUDIO_FRAME_SAMPLES];
+// audio buffer that tinybit will fill up
+int16_t prealloc_audio_buffer[TB_AUDIO_FRAME_SAMPLES];
 
-// Temporary buffers for frame and audio data to be processed
-int16_t temp_audio_buffer[TB_AUDIO_FRAME_SAMPLES];
-uint8_t temp_frame_buffer[TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2];
+// frame buffer that we will use temporarity while tinybit renders a new frame
+uint8_t prealloc_frame_buffer[TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2];
 
 // Filesystem state (kept mounted for game loading)
 static FATFS fs;
@@ -152,24 +151,21 @@ void sleep_ms_wrapper(int ms) {
 }
 
 void audio_queue_handler(void) {
-    memcpy(temp_audio_buffer, audio_buffer, sizeof(temp_audio_buffer));
     i2s_queue_samples();
 }
 
 // Signal frame ready - non-blocking for Lua
 void render_frame_handler(void) {
-    memcpy(temp_frame_buffer, tb_mem.display, TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2);
+    memcpy(prealloc_frame_buffer, tb_mem.display, TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2);
     frame_ready = true;
 }
 
 void core1_loop(void) {
     while(1) {
-
         if(frame_ready) {
             send_frame_to_lcd();
             frame_ready = false;
         }
-
     }
 }
 
@@ -221,7 +217,7 @@ int main() {
     tinybit_audio_queue_cb(audio_queue_handler);
 
     // Initialize TinyBit (starts game selector menu)
-    tinybit_init(&tb_mem, button_state, audio_buffer);
+    tinybit_init(&tb_mem, button_state, prealloc_audio_buffer);
 
     // Launch core1
     multicore_launch_core1(core1_loop);
@@ -230,7 +226,8 @@ int main() {
     tinybit_start();
 
     while(1) {
-    tinybit_loop();
+        tinybit_loop();
     }
+    
     return 0;
 }

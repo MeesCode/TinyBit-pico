@@ -123,7 +123,7 @@ void i2s_queue_samples() {
     // Convert mono to stereo into the fill buffer
     // I2S format: left in upper 16 bits, right in lower 16 bits
     for (uint32_t i = 0; i < TB_AUDIO_FRAME_SAMPLES; i++) {
-        uint16_t sample = (uint16_t)temp_audio_buffer[i];
+        uint16_t sample = (uint16_t)prealloc_audio_buffer[i];
         fill_buffer[i] = ((uint32_t)sample << 16) | sample;
     }
 

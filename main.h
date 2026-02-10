@@ -11,8 +11,8 @@ extern bool button_state[TB_BUTTON_COUNT];
 extern volatile bool frame_ready;
 extern volatile bool audio_ready;
 
-extern uint8_t temp_frame_buffer[TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2];
-extern int16_t temp_audio_buffer[TB_AUDIO_FRAME_SAMPLES];
+extern uint8_t prealloc_frame_buffer[TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2];
+extern int16_t prealloc_audio_buffer[TB_AUDIO_FRAME_SAMPLES];
 
 // Callback functions for TinyBit
 void tinybit_poll_input(void);

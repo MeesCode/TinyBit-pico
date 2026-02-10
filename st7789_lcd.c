@@ -163,7 +163,7 @@ void send_frame_to_lcd() {
 
     int current_buf = 0;
     uint32_t src_y = 0;
-    build_scanline_from_buffer(scanline_buf[current_buf], temp_frame_buffer, src_y);
+    build_scanline_from_buffer(scanline_buf[current_buf], prealloc_frame_buffer, src_y);
 
     for (int y = 0; y < SCREEN_HEIGHT; y++) {
         dma_channel_configure(
@@ -179,7 +179,7 @@ void send_frame_to_lcd() {
 
         if (y < SCREEN_HEIGHT - 1) {
             src_y = ((y + 1) * SCALE_Y) >> FRAC_BITS;
-            build_scanline_from_buffer(scanline_buf[current_buf], temp_frame_buffer, src_y);
+            build_scanline_from_buffer(scanline_buf[current_buf], prealloc_frame_buffer, src_y);
         }
 
         dma_channel_wait_for_finish_blocking(dma_chan);
@@ -189,7 +189,7 @@ void send_frame_to_lcd() {
 // Signal frame ready - non-blocking for Lua
 void render_frame(void) {
     // Copy to render buffer
-    memcpy(temp_frame_buffer, tb_mem.display, RENDER_WIDTH * RENDER_HEIGHT * 2);
+    memcpy(prealloc_frame_buffer, tb_mem.display, RENDER_WIDTH * RENDER_HEIGHT * 2);
 
     // Signal and return immediately
     frame_ready = true;
