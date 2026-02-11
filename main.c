@@ -20,7 +20,6 @@
 #include "st7789_lcd.h"
 
 volatile bool frame_ready = false;    // Signal from core0 to core1
-volatile bool audio_ready = false;    // Signal from core0 to core1
 
 struct TinyBitMemory tb_mem = {0};
 bool button_state[TB_BUTTON_COUNT] = {0};

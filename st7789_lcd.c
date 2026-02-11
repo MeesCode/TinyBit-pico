@@ -218,12 +218,3 @@ void send_frame_to_lcd() {
         dma_channel_wait_for_finish_blocking(dma_chan);
     }
 }
-
-// Signal frame ready - non-blocking for Lua
-void render_frame(void) {
-    // Copy to render buffer
-    memcpy(frame_buffer_copy, tb_mem.display, RENDER_WIDTH * RENDER_HEIGHT * 2);
-
-    // Signal and return immediately
-    frame_ready = true;
-}
