@@ -65,6 +65,39 @@ static const uint8_t st7789_init_seq[] = {
         0                                   // Terminate list
 };
 
+static inline void st7789_lcd_program_init(PIO pio, uint sm, uint offset, uint data_pin, uint clk_pin, float clk_div) {
+    pio_gpio_init(pio, data_pin);
+    pio_gpio_init(pio, clk_pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, data_pin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, clk_pin, 1, true);
+    pio_sm_config c = st7789_lcd_program_get_default_config(offset);
+    sm_config_set_sideset_pins(&c, clk_pin);
+    sm_config_set_out_pins(&c, data_pin, 1);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+    sm_config_set_clkdiv(&c, clk_div);
+    sm_config_set_out_shift(&c, false, true, 8);
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+// Making use of the narrow store replication behaviour on RP2040 to get the
+// data left-justified (as we are using shift-to-left to get MSB-first serial)
+
+static inline void st7789_lcd_put(PIO pio, uint sm, uint8_t x) {
+    while (pio_sm_is_tx_fifo_full(pio, sm))
+        ;
+    *(volatile uint8_t*)&pio->txf[sm] = x;
+}
+
+// SM is done when it stalls on an empty FIFO
+
+static inline void st7789_lcd_wait_idle(PIO pio, uint sm) {
+    uint32_t sm_stall_mask = 1u << (sm + PIO_FDEBUG_TXSTALL_LSB);
+    pio->fdebug = sm_stall_mask;
+    while (!(pio->fdebug & sm_stall_mask))
+        ;
+}
+
 static inline void lcd_set_dc_cs(bool dc, bool cs) {
     sleep_us(1);
     gpio_put_masked((1u << PIN_DC) | (1u << PIN_CS), !!dc << PIN_DC | !!cs << PIN_CS);
@@ -163,7 +196,7 @@ void send_frame_to_lcd() {
 
     int current_buf = 0;
     uint32_t src_y = 0;
-    build_scanline_from_buffer(scanline_buf[current_buf], prealloc_frame_buffer, src_y);
+    build_scanline_from_buffer(scanline_buf[current_buf], frame_buffer_copy, src_y);
 
     for (int y = 0; y < SCREEN_HEIGHT; y++) {
         dma_channel_configure(
@@ -179,7 +212,7 @@ void send_frame_to_lcd() {
 
         if (y < SCREEN_HEIGHT - 1) {
             src_y = ((y + 1) * SCALE_Y) >> FRAC_BITS;
-            build_scanline_from_buffer(scanline_buf[current_buf], prealloc_frame_buffer, src_y);
+            build_scanline_from_buffer(scanline_buf[current_buf], frame_buffer_copy, src_y);
         }
 
         dma_channel_wait_for_finish_blocking(dma_chan);
@@ -189,7 +222,7 @@ void send_frame_to_lcd() {
 // Signal frame ready - non-blocking for Lua
 void render_frame(void) {
     // Copy to render buffer
-    memcpy(prealloc_frame_buffer, tb_mem.display, RENDER_WIDTH * RENDER_HEIGHT * 2);
+    memcpy(frame_buffer_copy, tb_mem.display, RENDER_WIDTH * RENDER_HEIGHT * 2);
 
     // Signal and return immediately
     frame_ready = true;

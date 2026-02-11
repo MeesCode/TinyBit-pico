@@ -7,7 +7,6 @@
 #include <string.h>
 
 #include "main.h"
-#include "memory.h"
 
 // PIO and state machine configuration
 static PIO i2s_pio = pio1;  // Use PIO1 (PIO0 is used by LCD)
@@ -24,7 +23,7 @@ static uint32_t conversion_buffer_a[TB_AUDIO_FRAME_SAMPLES];
 static uint32_t conversion_buffer_b[TB_AUDIO_FRAME_SAMPLES];
 static uint32_t* active_dma_buffer = conversion_buffer_a;  // Buffer DMA reads from
 static uint32_t* fill_buffer = conversion_buffer_b;        // Buffer CPU writes to
-static volatile bool new_buffer_ready = false;             // New data ready to swap
+static volatile bool cpu_buffer_full = false;             // New data ready to swap
 static uint32_t current_sample_count = 0;
 
 void i2s_out_program_init(PIO pio, uint sm, uint offset, uint din_pin, uint bclk_pin, uint sample_rate) {
@@ -68,7 +67,7 @@ static void i2s_dma_irq_handler(void) {
     uint32_t* temp = active_dma_buffer;
     active_dma_buffer = fill_buffer;
     fill_buffer = temp;
-    new_buffer_ready = false;
+    cpu_buffer_full = false;
 
     // Restart DMA with fresh buffer
     dma_channel_set_read_addr(i2s_dma_channel, active_dma_buffer, true);
@@ -115,7 +114,7 @@ void i2s_queue_samples() {
 
     // wait for second buffer to be free if we're still processing the previous one
     // since this task runs in the main loop, fps is limited to audio playback
-    while(new_buffer_ready) {
+    while(cpu_buffer_full) {
         tight_loop_contents(); 
     }
 
@@ -130,14 +129,14 @@ void i2s_queue_samples() {
     bool dma_busy = dma_channel_is_busy(i2s_dma_channel);
 
     // Mark new buffer as ready
-    new_buffer_ready = true;
+    cpu_buffer_full = true;
 
     // If DMA is not running, swap and start immediately
     if (!dma_busy) {
         uint32_t* temp = active_dma_buffer;
         active_dma_buffer = fill_buffer;
         fill_buffer = temp;
-        new_buffer_ready = false;
+        cpu_buffer_full = false;
 
         dma_channel_configure(
             i2s_dma_channel,

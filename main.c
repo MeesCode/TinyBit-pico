@@ -26,7 +26,7 @@ struct TinyBitMemory tb_mem = {0};
 bool button_state[TB_BUTTON_COUNT] = {0};
 
 // frame buffer that we will use temporarity while tinybit renders a new frame
-uint8_t prealloc_frame_buffer[TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2];
+uint8_t frame_buffer_copy[TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2];
 
 // Filesystem state (kept mounted for game loading)
 static FATFS fs;
@@ -127,12 +127,12 @@ void sd_gameload(int index) {
 void tinybit_poll_input(void) {
     // Update button states
     // Example: Read GPIO pins and update button_state array
-    button_state[TB_BUTTON_A] = gpio_get(17); 
-    button_state[TB_BUTTON_B] = gpio_get(16); 
-    button_state[TB_BUTTON_UP] = gpio_get(16); // 21 
-    button_state[TB_BUTTON_DOWN] = gpio_get(19); 
-    button_state[TB_BUTTON_LEFT] = gpio_get(18); 
-    button_state[TB_BUTTON_RIGHT] = gpio_get(20); 
+    tb_mem.button_input[TB_BUTTON_A] = gpio_get(17); 
+    tb_mem.button_input[TB_BUTTON_B] = gpio_get(16); 
+    tb_mem.button_input[TB_BUTTON_UP] = gpio_get(16); // 21 
+    tb_mem.button_input[TB_BUTTON_DOWN] = gpio_get(19); 
+    tb_mem.button_input[TB_BUTTON_LEFT] = gpio_get(18); 
+    tb_mem.button_input[TB_BUTTON_RIGHT] = gpio_get(20); 
 }
 
 int to_ms(void) {
@@ -153,7 +153,7 @@ void audio_queue_handler(void) {
 
 // Signal frame ready - non-blocking for Lua
 void render_frame_handler(void) {
-    memcpy(prealloc_frame_buffer, tb_mem.display, TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2);
+    memcpy(frame_buffer_copy, tb_mem.display, TB_MEM_DISPLAY_SIZE);
     frame_ready = true;
 }
 
@@ -226,5 +226,7 @@ int main() {
         tinybit_loop();
     }
     
+    tinybit_stop();
+
     return 0;
 }
