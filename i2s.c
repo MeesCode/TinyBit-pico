@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "main.h"
-
+#include "memory.h"
 
 // PIO and state machine configuration
 static PIO i2s_pio = pio1;  // Use PIO1 (PIO0 is used by LCD)
@@ -20,9 +20,8 @@ static dma_channel_config i2s_dma_config;
 
 // Double-buffering for DMA (ping-pong buffers)
 // Max size based on TB_AUDIO_FRAME_SAMPLES (22000/60 = ~367 samples)
-#define I2S_CONVERSION_BUFFER_SIZE TB_AUDIO_FRAME_SAMPLES
-static uint32_t conversion_buffer_a[I2S_CONVERSION_BUFFER_SIZE];
-static uint32_t conversion_buffer_b[I2S_CONVERSION_BUFFER_SIZE];
+static uint32_t conversion_buffer_a[TB_AUDIO_FRAME_SAMPLES];
+static uint32_t conversion_buffer_b[TB_AUDIO_FRAME_SAMPLES];
 static uint32_t* active_dma_buffer = conversion_buffer_a;  // Buffer DMA reads from
 static uint32_t* fill_buffer = conversion_buffer_b;        // Buffer CPU writes to
 static volatile bool new_buffer_ready = false;             // New data ready to swap
@@ -123,7 +122,7 @@ void i2s_queue_samples() {
     // Convert mono to stereo into the fill buffer
     // I2S format: left in upper 16 bits, right in lower 16 bits
     for (uint32_t i = 0; i < TB_AUDIO_FRAME_SAMPLES; i++) {
-        uint16_t sample = (uint16_t)prealloc_audio_buffer[i];
+        uint16_t sample = (uint16_t)tinybit_memory->audio_buffer[i];
         fill_buffer[i] = ((uint32_t)sample << 16) | sample;
     }
 

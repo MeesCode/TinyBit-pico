@@ -25,9 +25,6 @@ volatile bool audio_ready = false;    // Signal from core0 to core1
 struct TinyBitMemory tb_mem = {0};
 bool button_state[TB_BUTTON_COUNT] = {0};
 
-// audio buffer that tinybit will fill up
-int16_t prealloc_audio_buffer[TB_AUDIO_FRAME_SAMPLES];
-
 // frame buffer that we will use temporarity while tinybit renders a new frame
 uint8_t prealloc_frame_buffer[TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2];
 
@@ -217,7 +214,7 @@ int main() {
     tinybit_audio_queue_cb(audio_queue_handler);
 
     // Initialize TinyBit (starts game selector menu)
-    tinybit_init(&tb_mem, button_state, prealloc_audio_buffer);
+    tinybit_init(&tb_mem, button_state);
 
     // Launch core1
     multicore_launch_core1(core1_loop);
