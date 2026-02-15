@@ -22,6 +22,28 @@
 #define RENDER_WIDTH 128
 #define RENDER_HEIGHT 128
 
+// LCD rotation: 0, 90, 180, or 270 degrees
+#ifndef LCD_ROTATION
+#define LCD_ROTATION 270
+#endif
+
+#if LCD_ROTATION == 0
+  #define MADCTL_VAL  0x00
+  #define COL_START   0
+  #define ROW_START   0
+#elif LCD_ROTATION == 90
+  #define MADCTL_VAL  0x60
+  #define COL_START   0
+  #define ROW_START   0
+#else
+  #error "LCD_ROTATION must be 0 or 90"
+#endif
+
+#define COL_END   (COL_START + SCREEN_WIDTH - 1)
+#define ROW_END   (ROW_START + SCREEN_HEIGHT - 1)
+#define PTLAR_START (COL_START > 0 || ROW_START > 0 ? 80 : 0)
+#define PTLAR_END   (COL_START > 0 || ROW_START > 0 ? 319 : 239)
+
 // Fixed-point fractional bits for scaling
 #define FRAC_BITS 16
 
@@ -46,7 +68,7 @@ static volatile int render_buffer_idx = 1;   // Buffer being rendered to by core
 #define PIN_RESET 4
 #define PIN_BL 5
 
-#define SERIAL_CLK_DIV 1.f
+#define SERIAL_CLK_DIV 1.5f
 
 static PIO pio = pio0;
 static uint sm = 0;
@@ -56,10 +78,10 @@ static const uint8_t st7789_init_seq[] = {
         1, 20, 0x01,                        // Software reset
         1, 10, 0x11,                        // Exit sleep mode
         2, 2, 0x3a, 0x55,                   // Set colour mode to 16 bit
-        2, 0, 0x36, 0x00,                   // Set MADCTL: row then column, refresh is bottom to top
-        5, 0, 0x2a, 0x00, 0x00, SCREEN_WIDTH >> 8, SCREEN_WIDTH & 0xff,   // CASET: column addresses
-        5, 0, 0x2b, 0x00, 0x00, SCREEN_HEIGHT >> 8, SCREEN_HEIGHT & 0xff, // RASET: row addresses
-        5, 0, 0x30, 0x00, 0x00, 0x00, 0xef, // PTLAR: partial area rows 0-239
+        2, 0, 0x36, MADCTL_VAL,              // Set MADCTL for rotation
+        5, 0, 0x2a, COL_START >> 8, COL_START & 0xff, COL_END >> 8, COL_END & 0xff,     // CASET
+        5, 0, 0x2b, ROW_START >> 8, ROW_START & 0xff, ROW_END >> 8, ROW_END & 0xff,     // RASET
+        5, 0, 0x30, PTLAR_START >> 8, PTLAR_START & 0xff, PTLAR_END >> 8, PTLAR_END & 0xff, // PTLAR
         1, 2, 0x21,                         // Inversion on, then 10 ms delay
         1, 2, 0x12,                         // Partial display mode on, then 10 ms delay
         1, 2, 0x29,                         // Main screen turn on, then wait 500 ms
