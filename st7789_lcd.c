@@ -59,8 +59,9 @@ static const uint8_t st7789_init_seq[] = {
         2, 0, 0x36, 0x00,                   // Set MADCTL: row then column, refresh is bottom to top
         5, 0, 0x2a, 0x00, 0x00, SCREEN_WIDTH >> 8, SCREEN_WIDTH & 0xff,   // CASET: column addresses
         5, 0, 0x2b, 0x00, 0x00, SCREEN_HEIGHT >> 8, SCREEN_HEIGHT & 0xff, // RASET: row addresses
+        5, 0, 0x30, 0x00, 0x00, 0x00, 0xef, // PTLAR: partial area rows 0-239
         1, 2, 0x21,                         // Inversion on, then 10 ms delay
-        1, 2, 0x13,                         // Normal display on, then 10 ms delay
+        1, 2, 0x12,                         // Partial display mode on, then 10 ms delay
         1, 2, 0x29,                         // Main screen turn on, then wait 500 ms
         0                                   // Terminate list
 };
