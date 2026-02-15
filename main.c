@@ -213,7 +213,7 @@ int main() {
     tinybit_audio_queue_cb(audio_queue_handler);
 
     // Initialize TinyBit (starts game selector menu)
-    tinybit_init(&tb_mem, button_state);
+    tinybit_init(&tb_mem);
 
     // Launch core1
     multicore_launch_core1(core1_loop);

@@ -24,7 +24,7 @@
 
 // LCD rotation: 0, 90, 180, or 270 degrees
 #ifndef LCD_ROTATION
-#define LCD_ROTATION 270
+#define LCD_ROTATION 0
 #endif
 
 #if LCD_ROTATION == 0
