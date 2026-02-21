@@ -183,8 +183,10 @@ int main() {
     gpio_set_dir(20, GPIO_IN);
     gpio_set_dir(21, GPIO_IN);
 
-    // Initialize LCD display
+    // Initialize and clear LCD display
     lcd_init_display();
+    memset(frame_buffer_copy, 0, TB_MEM_DISPLAY_SIZE);
+    send_frame_to_lcd();
 
     // Initialize I2S audio output
     i2s_init();
