@@ -22,6 +22,28 @@
 #define RENDER_WIDTH 128
 #define RENDER_HEIGHT 128
 
+// LCD rotation: 0, 90, 180, or 270 degrees
+#ifndef LCD_ROTATION
+#define LCD_ROTATION 0
+#endif
+
+#if LCD_ROTATION == 0
+  #define MADCTL_VAL  0x00
+  #define COL_START   0
+  #define ROW_START   0
+#elif LCD_ROTATION == 90
+  #define MADCTL_VAL  0x60
+  #define COL_START   0
+  #define ROW_START   0
+#else
+  #error "LCD_ROTATION must be 0 or 90"
+#endif
+
+#define COL_END   (COL_START + SCREEN_WIDTH - 1)
+#define ROW_END   (ROW_START + SCREEN_HEIGHT - 1)
+#define PTLAR_START (COL_START > 0 || ROW_START > 0 ? 80 : 0)
+#define PTLAR_END   (COL_START > 0 || ROW_START > 0 ? 319 : 239)
+
 // Fixed-point fractional bits for scaling
 #define FRAC_BITS 16
 
@@ -36,10 +58,8 @@ static int dma_chan;
 static dma_channel_config dma_cfg;
 
 // Double buffer for frame data (128x128 RGBA4444 = 32KB each)
-static uint8_t frame_buffer[2][RENDER_WIDTH * RENDER_HEIGHT * 2];
 static volatile int display_buffer_idx = 0;  // Buffer being displayed by core1
 static volatile int render_buffer_idx = 1;   // Buffer being rendered to by core0
-static volatile bool frame_ready = false;    // Signal from core0 to core1
 
 #define PIN_DIN 0
 #define PIN_CLK 1
@@ -48,7 +68,7 @@ static volatile bool frame_ready = false;    // Signal from core0 to core1
 #define PIN_RESET 4
 #define PIN_BL 5
 
-#define SERIAL_CLK_DIV 1.f
+#define SERIAL_CLK_DIV 1.5f
 
 static PIO pio = pio0;
 static uint sm = 0;
@@ -58,14 +78,48 @@ static const uint8_t st7789_init_seq[] = {
         1, 20, 0x01,                        // Software reset
         1, 10, 0x11,                        // Exit sleep mode
         2, 2, 0x3a, 0x55,                   // Set colour mode to 16 bit
-        2, 0, 0x36, 0x00,                   // Set MADCTL: row then column, refresh is bottom to top
-        5, 0, 0x2a, 0x00, 0x00, SCREEN_WIDTH >> 8, SCREEN_WIDTH & 0xff,   // CASET: column addresses
-        5, 0, 0x2b, 0x00, 0x00, SCREEN_HEIGHT >> 8, SCREEN_HEIGHT & 0xff, // RASET: row addresses
+        2, 0, 0x36, MADCTL_VAL,              // Set MADCTL for rotation
+        5, 0, 0x2a, COL_START >> 8, COL_START & 0xff, COL_END >> 8, COL_END & 0xff,     // CASET
+        5, 0, 0x2b, ROW_START >> 8, ROW_START & 0xff, ROW_END >> 8, ROW_END & 0xff,     // RASET
+        5, 0, 0x30, PTLAR_START >> 8, PTLAR_START & 0xff, PTLAR_END >> 8, PTLAR_END & 0xff, // PTLAR
         1, 2, 0x21,                         // Inversion on, then 10 ms delay
-        1, 2, 0x13,                         // Normal display on, then 10 ms delay
+        1, 2, 0x12,                         // Partial display mode on, then 10 ms delay
         1, 2, 0x29,                         // Main screen turn on, then wait 500 ms
         0                                   // Terminate list
 };
+
+static inline void st7789_lcd_program_init(PIO pio, uint sm, uint offset, uint data_pin, uint clk_pin, float clk_div) {
+    pio_gpio_init(pio, data_pin);
+    pio_gpio_init(pio, clk_pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, data_pin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, clk_pin, 1, true);
+    pio_sm_config c = st7789_lcd_program_get_default_config(offset);
+    sm_config_set_sideset_pins(&c, clk_pin);
+    sm_config_set_out_pins(&c, data_pin, 1);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+    sm_config_set_clkdiv(&c, clk_div);
+    sm_config_set_out_shift(&c, false, true, 8);
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+// Making use of the narrow store replication behaviour on RP2040 to get the
+// data left-justified (as we are using shift-to-left to get MSB-first serial)
+
+static inline void st7789_lcd_put(PIO pio, uint sm, uint8_t x) {
+    while (pio_sm_is_tx_fifo_full(pio, sm))
+        ;
+    *(volatile uint8_t*)&pio->txf[sm] = x;
+}
+
+// SM is done when it stalls on an empty FIFO
+
+static inline void st7789_lcd_wait_idle(PIO pio, uint sm) {
+    uint32_t sm_stall_mask = 1u << (sm + PIO_FDEBUG_TXSTALL_LSB);
+    pio->fdebug = sm_stall_mask;
+    while (!(pio->fdebug & sm_stall_mask))
+        ;
+}
 
 static inline void lcd_set_dc_cs(bool dc, bool cs) {
     sleep_us(1);
@@ -155,7 +209,8 @@ static inline void build_scanline_from_buffer(uint8_t *dest, const uint8_t *src_
 }
 
 // Send frame buffer to LCD with scanline double-buffering
-static void send_frame_to_lcd(const uint8_t *src_buffer) {
+void send_frame_to_lcd() {
+
     st7789_start_pixels(pio, sm);
 
     interp_config cfg = interp_default_config();
@@ -164,7 +219,7 @@ static void send_frame_to_lcd(const uint8_t *src_buffer) {
 
     int current_buf = 0;
     uint32_t src_y = 0;
-    build_scanline_from_buffer(scanline_buf[current_buf], src_buffer, src_y);
+    build_scanline_from_buffer(scanline_buf[current_buf], frame_buffer_copy, src_y);
 
     for (int y = 0; y < SCREEN_HEIGHT; y++) {
         dma_channel_configure(
@@ -180,41 +235,9 @@ static void send_frame_to_lcd(const uint8_t *src_buffer) {
 
         if (y < SCREEN_HEIGHT - 1) {
             src_y = ((y + 1) * SCALE_Y) >> FRAC_BITS;
-            build_scanline_from_buffer(scanline_buf[current_buf], src_buffer, src_y);
+            build_scanline_from_buffer(scanline_buf[current_buf], frame_buffer_copy, src_y);
         }
 
         dma_channel_wait_for_finish_blocking(dma_chan);
     }
-}
-
-// Core1 entry point - runs LCD output loop
-void core1_lcd_loop(void) {
-    while (1) {
-        while (!frame_ready) {
-            tight_loop_contents();
-        }
-
-        // Swap buffers
-        int buf_to_display = render_buffer_idx;
-        render_buffer_idx = display_buffer_idx;
-        display_buffer_idx = buf_to_display;
-
-        frame_ready = false;
-
-        send_frame_to_lcd(frame_buffer[buf_to_display]);
-    }
-}
-
-// Signal frame ready - non-blocking for Lua
-void render_frame(void) {
-    // Wait only if core1 hasn't picked up previous frame
-    while (frame_ready) {
-        tight_loop_contents();
-    }
-
-    // Copy to render buffer
-    memcpy(frame_buffer[render_buffer_idx], tb_mem.display, RENDER_WIDTH * RENDER_HEIGHT * 2);
-
-    // Signal and return immediately
-    frame_ready = true;
 }

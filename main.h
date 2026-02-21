@@ -3,10 +3,12 @@
 
 #include <stdbool.h>
 #include "TinyBit-lib/tinybit.h"
+#include "TinyBit-lib/cartridge.h"
+#include "TinyBit-lib/memory.h"
 
 // TinyBit memory and state
 extern struct TinyBitMemory tb_mem;
-extern bool button_state[TB_BUTTON_COUNT];
+extern uint8_t frame_buffer_copy[TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2];
 
 // Callback functions for TinyBit
 void tinybit_poll_input(void);

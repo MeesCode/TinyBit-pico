@@ -17,12 +17,15 @@
 #include "f_util.h"
 #include "ff.h"
 #include "i2s.h"
+#include "st7789_lcd.h"
+
+volatile bool frame_ready = false;    // Signal from core0 to core1
 
 struct TinyBitMemory tb_mem = {0};
 bool button_state[TB_BUTTON_COUNT] = {0};
 
-// Pre-allocated audio buffer (mono samples for one frame)
-static int16_t audio_buffer[TB_AUDIO_FRAME_SAMPLES];
+// frame buffer that we will use temporarity while tinybit renders a new frame
+uint8_t frame_buffer_copy[TB_SCREEN_WIDTH * TB_SCREEN_HEIGHT * 2];
 
 // Filesystem state (kept mounted for game loading)
 static FATFS fs;
@@ -123,12 +126,12 @@ void sd_gameload(int index) {
 void tinybit_poll_input(void) {
     // Update button states
     // Example: Read GPIO pins and update button_state array
-    button_state[TB_BUTTON_A] = gpio_get(17); 
-    button_state[TB_BUTTON_B] = gpio_get(16); 
-    button_state[TB_BUTTON_UP] = gpio_get(21); 
-    button_state[TB_BUTTON_DOWN] = gpio_get(19); 
-    button_state[TB_BUTTON_LEFT] = gpio_get(18); 
-    button_state[TB_BUTTON_RIGHT] = gpio_get(20); 
+    tb_mem.button_input[TB_BUTTON_A] = gpio_get(17); 
+    tb_mem.button_input[TB_BUTTON_B] = gpio_get(16); 
+    tb_mem.button_input[TB_BUTTON_UP] = gpio_get(16); // 21 
+    tb_mem.button_input[TB_BUTTON_DOWN] = gpio_get(19); 
+    tb_mem.button_input[TB_BUTTON_LEFT] = gpio_get(18); 
+    tb_mem.button_input[TB_BUTTON_RIGHT] = gpio_get(20); 
 }
 
 int to_ms(void) {
@@ -143,9 +146,23 @@ void sleep_ms_wrapper(int ms) {
     sleep_ms(ms);
 }
 
-// Audio queue callback - called from game loop after process_audio() fills the buffer
 void audio_queue_handler(void) {
-    i2s_queue_mono_samples(audio_buffer, TB_AUDIO_FRAME_SAMPLES);
+    i2s_queue_samples();
+}
+
+// Signal frame ready - non-blocking for Lua
+void render_frame_handler(void) {
+    memcpy(frame_buffer_copy, tb_mem.display, TB_MEM_DISPLAY_SIZE);
+    frame_ready = true;
+}
+
+void core1_loop(void) {
+    while(1) {
+        if(frame_ready) {
+            send_frame_to_lcd();
+            frame_ready = false;
+        }
+    }
 }
 
 int main() {
@@ -189,21 +206,26 @@ int main() {
     tinybit_log_cb(log_printf);
     tinybit_gamecount_cb(sd_gamecount);
     tinybit_gameload_cb(sd_gameload);
-    tinybit_render_cb(render_frame);
+    tinybit_render_cb(render_frame_handler);
     tinybit_poll_input_cb(tinybit_poll_input);
     tinybit_sleep_cb(sleep_ms_wrapper);
     tinybit_get_ticks_ms_cb(to_ms);
     tinybit_audio_queue_cb(audio_queue_handler);
 
     // Initialize TinyBit (starts game selector menu)
-    tinybit_init(&tb_mem, button_state, audio_buffer);
+    tinybit_init(&tb_mem);
 
-    // Launch core1 for LCD output
-    printf("Starting core1 for LCD rendering...\n");
-    multicore_launch_core1(core1_lcd_loop);
+    // Launch core1
+    multicore_launch_core1(core1_loop);
 
     // Start game loop on core0
     tinybit_start();
-    tinybit_loop();
+
+    while(1) {
+        tinybit_loop();
+    }
+    
+    tinybit_stop();
+
     return 0;
 }
