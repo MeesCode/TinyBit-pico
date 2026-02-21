@@ -128,7 +128,7 @@ void tinybit_poll_input(void) {
     // Example: Read GPIO pins and update button_state array
     tb_mem.button_input[TB_BUTTON_A] = gpio_get(17); 
     tb_mem.button_input[TB_BUTTON_B] = gpio_get(16); 
-    tb_mem.button_input[TB_BUTTON_UP] = gpio_get(16); // 21 
+    tb_mem.button_input[TB_BUTTON_UP] = gpio_get(21); // 21 
     tb_mem.button_input[TB_BUTTON_DOWN] = gpio_get(19); 
     tb_mem.button_input[TB_BUTTON_LEFT] = gpio_get(18); 
     tb_mem.button_input[TB_BUTTON_RIGHT] = gpio_get(20); 
@@ -140,10 +140,6 @@ int to_ms(void) {
 
 void log_printf(const char* msg) {
     printf("%s", msg);
-}
-
-void sleep_ms_wrapper(int ms) {
-    sleep_ms(ms);
 }
 
 void audio_queue_handler(void) {
@@ -208,7 +204,6 @@ int main() {
     tinybit_gameload_cb(sd_gameload);
     tinybit_render_cb(render_frame_handler);
     tinybit_poll_input_cb(tinybit_poll_input);
-    tinybit_sleep_cb(sleep_ms_wrapper);
     tinybit_get_ticks_ms_cb(to_ms);
     tinybit_audio_queue_cb(audio_queue_handler);
 
